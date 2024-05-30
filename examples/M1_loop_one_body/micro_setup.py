@@ -9,10 +9,10 @@ from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension
 
 name      = "micro"
-debug     = False 
+debug     = True
 if(debug): print(f"WARNING DEBUG IS TRUE")
 cuda_ext  = tbu.cuda_extension(name, debug, 'A100')
 setup(name=f"{name}", 
-      ext_modules=[cuda_ext], 
+      ext_modules=[cuda_ext],
       cmdclass={'build_ext': BuildExtension})
 if(debug): print(f"WARNING DEBUG IS TRUE")

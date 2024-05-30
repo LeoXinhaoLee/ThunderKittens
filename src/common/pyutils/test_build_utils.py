@@ -40,7 +40,9 @@ def cuda_extension(name, debug, gpu_type):
     _cuda_flags  = [
                     '--use_fast_math',
                     '--generate-line-info', 
-                    '--restrict', '-std=c++20',
+                    '--restrict',
+                    # '-std=c++2a',
+                    '-std=c++20',
                     '--expt-relaxed-constexpr',
                     '--expt-extended-lambda',
                     '-Xcompiler=-fno-strict-aliasing',
@@ -56,13 +58,17 @@ def cuda_extension(name, debug, gpu_type):
         _cuda_flags.append('-DKITTENS_HOPPER')
         _cuda_flags.append('-arch=sm_90a')
     elif gpu_type == 'A100':
-        _cuda_flags.append('-DKITTENS_A100')
         _cuda_flags.append('-arch=sm_80')
+        _cuda_flags.append('-DKITTENS_A100')
+
     
     if(debug): _cuda_flags += ['-D__DEBUG_PRINT', '-g', '-G']
     return CUDAExtension(f'{name}', 
                         sources=_sources(name), 
-                        extra_compile_args={'cxx' : ['-std=c++20'],
+                        extra_compile_args={'cxx' : [
+                            '-std=c++20',
+                            # '-std=c++2a',
+                        ],
                                             'nvcc' : ['-O3'] + _cuda_flags}, 
                         libraries=['cuda'])
 
