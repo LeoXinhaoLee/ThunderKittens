@@ -19,7 +19,7 @@ using namespace kittens;
 
 template <typename H, typename T>
 __global__
-void micro_ker(
+void prefill_ker(
         int CS, int HF,
         T* __W1,
         const T* __XA, const T* __XB, const T* __XC,
@@ -31,7 +31,6 @@ void micro_ker(
     const H *_XB       = reinterpret_cast<const H*>(__XB)+blockIdx.x*(CS*HF);
     const H *_XC       = reinterpret_cast<const H*>(__XC)+blockIdx.x*(CS*HF);
     H *_Output = reinterpret_cast<H*>(__Output)+blockIdx.x*(CS*HF);
-//    H *_Output = reinterpret_cast<H*>(__Output)+blockIdx.x*(CS*CS);  // debug: Attn match
 
     /*********
     REGISTER
@@ -45,15 +44,12 @@ void micro_ker(
     rt_bf<1, 4> Z1_reg;
 
     rt_bf<1, 4> Output_reg;
-//    rt_bf<1, 1> Output_reg;  // debug: Attn match
     rt_fl<1, 4> Z1_bar_term_1_fl_reg;
     rt_bf<1, 4> Z1_bar_term_1_reg;
     rt_fl<1, 4> Z1_bar_term_2_fl_reg;
     rt_bf<1, 4> Z1_bar_term_2_reg;
     rt_fl<1, 1> Attn1_fl_reg;
     rt_bf<1, 1> Attn1_reg;
-
-//    load(Output_reg, _XB, XB_reg.cols); // debug
 
     load(W1_reg, _W1, W1_reg.cols);
     load(XB_reg, _XB, XB_reg.cols);
@@ -62,30 +58,24 @@ void micro_ker(
 
     zero(Z1_fl_reg);
     mma_AB(Z1_fl_reg, XB_reg, W1_reg, Z1_fl_reg); // [K,f] r, [f,f] c -> [K,f] r
-//    copy(Output_reg, Z1_fl_reg); // debug: matched
 
     copy(Z1_reg, Z1_fl_reg);
     sub(Z1_reg, Z1_reg, XA_reg);
-//    copy(Output_reg, Z1_reg); // debug: matched
 
     rt_bf<1, 4, ducks::rt_layout::col> &Z1_col_reg = swap_layout_inplace(Z1_reg); // row-maj -> col-maj
 
     zero(Attn1_fl_reg);
     mma_ABt(Attn1_fl_reg, XC_reg, XB_reg, Attn1_fl_reg);  // [N,K] r, [M,K] r -> [N,M] r
     copy(Attn1_reg, Attn1_fl_reg);
-//    copy(Output_reg, Attn1_reg); // debug
     make_causal(Attn1_reg, Attn1_reg, base_types::constants<bf16>::zero());
-//    copy(Output_reg, Attn1_reg); // debug: doesn't match, but no illegal access
 
     zero(Z1_bar_term_1_fl_reg);
     mma_AB(Z1_bar_term_1_fl_reg, XC_reg, W1_reg, Z1_bar_term_1_fl_reg); // [N,K] r, [K,M] c -> [N,M] r
     copy(Z1_bar_term_1_reg, Z1_bar_term_1_fl_reg);
-//    copy(Output_reg, Z1_bar_term_1_reg);  // debug: match
 
     zero(Z1_bar_term_2_fl_reg);
     mma_AB(Z1_bar_term_2_fl_reg, Attn1_reg, Z1_col_reg, Z1_bar_term_2_fl_reg);  // [K,K] r, [K,f] c -> [K,f] r
     copy(Z1_bar_term_2_reg, Z1_bar_term_2_fl_reg);
-//    copy(Output_reg, Z1_bar_term_2_reg);  // debug: match
 
     sub(Output_reg, Z1_bar_term_1_reg, Z1_bar_term_2_reg);
 
@@ -94,8 +84,15 @@ void micro_ker(
 }
 
 void
-micro( torch::Tensor W1,
-       torch::Tensor XA, torch::Tensor XB, torch::Tensor XC,  torch::Tensor Output) {
+prefill
+(
+    torch::Tensor W1,
+    torch::Tensor XA,
+    torch::Tensor XB,
+    torch::Tensor XC,
+    torch::Tensor Output,
+    cudaStream_t stream
+) {
 
     auto batch_mul_head = XA.size(0);
     auto cs    = XA.size(1);
@@ -107,12 +104,12 @@ micro( torch::Tensor W1,
 
     auto threads = workers * kittens::WARP_THREADS;
 
-    micro_ker<H,T><<<batch_mul_head,threads>>>(
+    prefill_ker<H,T><<<batch_mul_head, threads, 128, stream>>>(
             cs, hf,
             W1.data_ptr<T>(),
             XA.data_ptr<T>(), XB.data_ptr<T>(), XC.data_ptr<T>(),
             Output.data_ptr<T>()
     );
 
-    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
+//    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 }

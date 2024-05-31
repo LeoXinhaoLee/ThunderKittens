@@ -16,6 +16,7 @@ if project_root is None:
     os._exit(-1)   
 
 def _sources(name): return [f"{name}_frontend.cpp", f"{name}.cu"]
+
 def jit_build(name, debug=False, gpu_type='4090'):
     _cuda_flags  = ['-U__CUDA_NO_HALF_OPERATORS__', '-U__CUDA_NO_HALF_CONVERSIONS__', '--generate-line-info', '--restrict', 
                     f"-I {project_root}"]

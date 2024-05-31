@@ -5,7 +5,7 @@ import sys
 sys.path.append("../../")
 import copy
 from src.common.pyutils.test_build_utils import  __eq
-import micro as mod
+import tk_m1_prefill
 
 
 def pt_prefill(W1, XA, XB, XC):
@@ -25,7 +25,7 @@ def pt_prefill(W1, XA, XB, XC):
 def simple_test(dt, use_ones=False):
     torch.manual_seed(0)
     input_dtype = torch.bfloat16
-    BS, NH, HF, = 1, 2, 64
+    BS, NH, HF, = 128, 32, 64
     CS = 16
 
     match_module = 'M1'
@@ -39,21 +39,13 @@ def simple_test(dt, use_ones=False):
         'XB': torch.randn(BS * NH, CS, HF, device='cuda', dtype=input_dtype) * 0.2,
         'XC': torch.randn(BS * NH, CS, HF, device='cuda', dtype=input_dtype) * 0.2,
     }
-    # original_input_dict['XA'][0].zero_()
-    # original_input_dict['XB'][0].zero_()
-    # original_input_dict['XC'][0].zero_()
-    # for i in range(CS):
-    #     original_input_dict['XA'][1][i] = i + 1.
-    #     original_input_dict['XB'][1][i] = i + 1.
-    #     original_input_dict['XC'][1][i] = i + 1.
 
     cuda_state_dict = copy.deepcopy(original_state_dict)
     cuda_input_dict = copy.deepcopy(original_input_dict)
     cuda_output  = torch.zeros_like(cuda_input_dict['XA'])
-    # cuda_output  = torch.zeros(BS*NH, CS, CS, dtype=input_dtype, device='cuda')
-    mod.micro(cuda_state_dict['W1'],
-              cuda_input_dict['XA'], cuda_input_dict['XB'], cuda_input_dict['XC'],
-              cuda_output)
+    tk_m1_prefill.prefill(cuda_state_dict['W1'],
+                          cuda_input_dict['XA'], cuda_input_dict['XB'], cuda_input_dict['XC'],
+                          cuda_output)
 
     pt_state_dict = copy.deepcopy(original_state_dict)
     pt_input_dict = copy.deepcopy(original_input_dict)
@@ -72,9 +64,6 @@ def simple_test(dt, use_ones=False):
     print(pt_output[1,:,:2])
     # print(pt_output[0,:4,:4])
 
-    # print(cuda_output[0,0,:4])
-    # print(pt_output[0,0,:4])
-    # print(cuda_output)
 
     print(f'\n========== {match_module} Matching  ============')
     print('Pytorch v.s TK')
