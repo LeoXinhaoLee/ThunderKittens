@@ -19,5 +19,5 @@ extern void  prefill_ref(torch::Tensor W1,
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.doc() = "Test handler for warp test"; // optional module docstring
-    m.def("prefill", prefill_ref);
+    m.def("prefill", &prefill_ref);
 }

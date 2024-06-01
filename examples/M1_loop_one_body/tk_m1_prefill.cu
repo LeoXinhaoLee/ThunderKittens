@@ -35,51 +35,53 @@ void prefill_ker(
     /*********
     REGISTER
     **********/
-    rt_bf<4, 4, kittens::ducks::rt_layout::col> W1_reg;
+//    rt_bf<4, 4, kittens::ducks::rt_layout::col> W1_reg;
     rt_bf<1, 4> XA_reg;
-    rt_bf<1, 4> XB_reg;
-    rt_bf<1, 4> XC_reg;
+//    rt_bf<1, 4> XB_reg;
+//    rt_bf<1, 4> XC_reg;
 
-    rt_fl<1, 4> Z1_fl_reg;
-    rt_bf<1, 4> Z1_reg;
+//    rt_fl<1, 4> Z1_fl_reg;
+//    rt_bf<1, 4> Z1_reg;
 
-    rt_bf<1, 4> Output_reg;
-    rt_fl<1, 4> Z1_bar_term_1_fl_reg;
-    rt_bf<1, 4> Z1_bar_term_1_reg;
-    rt_fl<1, 4> Z1_bar_term_2_fl_reg;
-    rt_bf<1, 4> Z1_bar_term_2_reg;
-    rt_fl<1, 1> Attn1_fl_reg;
-    rt_bf<1, 1> Attn1_reg;
+//    rt_bf<1, 4> Output_reg;
+//    rt_fl<1, 4> Z1_bar_term_1_fl_reg;
+//    rt_bf<1, 4> Z1_bar_term_1_reg;
+//    rt_fl<1, 4> Z1_bar_term_2_fl_reg;
+//    rt_bf<1, 4> Z1_bar_term_2_reg;
+//    rt_fl<1, 1> Attn1_fl_reg;
+//    rt_bf<1, 1> Attn1_reg;
 
-    load(W1_reg, _W1, W1_reg.cols);
-    load(XB_reg, _XB, XB_reg.cols);
+//    load(W1_reg, _W1, W1_reg.cols);
+//    load(XB_reg, _XB, XB_reg.cols);
     load(XA_reg, _XA, XA_reg.cols);
-    load(XC_reg, _XC, XC_reg.cols);
+//    load(XC_reg, _XC, XC_reg.cols);
 
-    zero(Z1_fl_reg);
-    mma_AB(Z1_fl_reg, XB_reg, W1_reg, Z1_fl_reg); // [K,f] r, [f,f] c -> [K,f] r
+//    store(_Output, XA_reg, XA_reg.cols); // debug kernel launch overhead
 
-    copy(Z1_reg, Z1_fl_reg);
-    sub(Z1_reg, Z1_reg, XA_reg);
+//    zero(Z1_fl_reg);
+//    mma_AB(Z1_fl_reg, XB_reg, W1_reg, Z1_fl_reg); // [K,f] r, [f,f] c -> [K,f] r
+//
+//    copy(Z1_reg, Z1_fl_reg);
+//    sub(Z1_reg, Z1_reg, XA_reg);
+//
+//    rt_bf<1, 4, ducks::rt_layout::col> &Z1_col_reg = swap_layout_inplace(Z1_reg); // row-maj -> col-maj
+//
+//    zero(Attn1_fl_reg);
+//    mma_ABt(Attn1_fl_reg, XC_reg, XB_reg, Attn1_fl_reg);  // [N,K] r, [M,K] r -> [N,M] r
+//    copy(Attn1_reg, Attn1_fl_reg);
+//    make_causal(Attn1_reg, Attn1_reg, base_types::constants<bf16>::zero());
+//
+//    zero(Z1_bar_term_1_fl_reg);
+//    mma_AB(Z1_bar_term_1_fl_reg, XC_reg, W1_reg, Z1_bar_term_1_fl_reg); // [N,K] r, [K,M] c -> [N,M] r
+//    copy(Z1_bar_term_1_reg, Z1_bar_term_1_fl_reg);
+//
+//    zero(Z1_bar_term_2_fl_reg);
+//    mma_AB(Z1_bar_term_2_fl_reg, Attn1_reg, Z1_col_reg, Z1_bar_term_2_fl_reg);  // [K,K] r, [K,f] c -> [K,f] r
+//    copy(Z1_bar_term_2_reg, Z1_bar_term_2_fl_reg);
+//
+//    sub(Output_reg, Z1_bar_term_1_reg, Z1_bar_term_2_reg);
 
-    rt_bf<1, 4, ducks::rt_layout::col> &Z1_col_reg = swap_layout_inplace(Z1_reg); // row-maj -> col-maj
-
-    zero(Attn1_fl_reg);
-    mma_ABt(Attn1_fl_reg, XC_reg, XB_reg, Attn1_fl_reg);  // [N,K] r, [M,K] r -> [N,M] r
-    copy(Attn1_reg, Attn1_fl_reg);
-    make_causal(Attn1_reg, Attn1_reg, base_types::constants<bf16>::zero());
-
-    zero(Z1_bar_term_1_fl_reg);
-    mma_AB(Z1_bar_term_1_fl_reg, XC_reg, W1_reg, Z1_bar_term_1_fl_reg); // [N,K] r, [K,M] c -> [N,M] r
-    copy(Z1_bar_term_1_reg, Z1_bar_term_1_fl_reg);
-
-    zero(Z1_bar_term_2_fl_reg);
-    mma_AB(Z1_bar_term_2_fl_reg, Attn1_reg, Z1_col_reg, Z1_bar_term_2_fl_reg);  // [K,K] r, [K,f] c -> [K,f] r
-    copy(Z1_bar_term_2_reg, Z1_bar_term_2_fl_reg);
-
-    sub(Output_reg, Z1_bar_term_1_reg, Z1_bar_term_2_reg);
-
-    store(_Output, Output_reg, Output_reg.cols);
+//    store(_Output, Output_reg, Output_reg.cols);
 
 }
 
@@ -104,7 +106,7 @@ prefill
 
     auto threads = workers * kittens::WARP_THREADS;
 
-    prefill_ker<H,T><<<batch_mul_head, threads, 128, stream>>>(
+    prefill_ker<H,T><<<batch_mul_head, threads, 0, stream>>>(
             cs, hf,
             W1.data_ptr<T>(),
             XA.data_ptr<T>(), XB.data_ptr<T>(), XC.data_ptr<T>(),

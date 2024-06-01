@@ -9,7 +9,7 @@ from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension
 
 name      = "tk_m1_prefill"
-debug     = True
+debug     = False
 if(debug): print(f"WARNING DEBUG IS TRUE")
 cuda_ext  = tbu.cuda_extension(name, debug, 'A100')
 setup(name=f"{name}", 

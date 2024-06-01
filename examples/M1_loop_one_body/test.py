@@ -25,7 +25,7 @@ def pt_prefill(W1, XA, XB, XC):
 def simple_test(dt, use_ones=False):
     torch.manual_seed(0)
     input_dtype = torch.bfloat16
-    BS, NH, HF, = 128, 32, 64
+    BS, NH, HF, = 2, 2, 64
     CS = 16
 
     match_module = 'M1'
