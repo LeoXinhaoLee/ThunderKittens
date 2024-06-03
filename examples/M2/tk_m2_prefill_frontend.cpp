@@ -13,7 +13,10 @@ extern void  prefill_whole_loop_ref(torch::Tensor W1, torch::Tensor W2,
                                     torch::Tensor Out)
 {
     auto stream = at::cuda::getCurrentCUDAStream();
-    prefill_whole_loop(W1, W1, XA, XB, XC, Out, stream);
+    prefill_whole_loop(W1, W2,
+                       XA, XB, XC,
+                       Out,
+                       stream);
 }
 
 
