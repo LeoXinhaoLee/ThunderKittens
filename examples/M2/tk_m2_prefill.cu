@@ -46,48 +46,29 @@ void prefill_whole_loop_ker(
     const __nv_bfloat16 *_XB       = __XB + blockIdx.x * NC * X_STRIDE;
     __nv_bfloat16 *_Output = __Output + blockIdx.x * NC * X_STRIDE;
 
-    rt_bf<4, 16, kittens::ducks::rt_layout::col> W1_col_reg;
-//    rt_fl<4, 16> delta_W1_fl_reg;
-//    rt_bf<4, 16> delta_W1_reg;
+    extern __shared__ alignment_dummy __shm[]; // this is the CUDA shared memory
+    shared_allocator al((int*)&__shm[0]);
+
+
+
+    
 
     rt_bf<16, 4, kittens::ducks::rt_layout::col> W2_col_reg;
-//    rt_fl<16, 4> delta_W2_fl_reg;
-//    rt_bf<16, 4> delta_W2_reg;
 
-//    rt_bf<1, 4> XA_reg;
-//    rt_bf<1, 4> XB_reg;
-//    rt_bf<1, 4> XC_reg;
+    st_bf<4, 16, ducks::st_layout::swizzle> (&w1_smem)[1] = al.allocate<st_bf<4, 16, ducks::st_layout::swizzle>, 1>();
 
-//    rt_fl<1, 16> Z1_fl_reg;
-//    rt_bf<1, 16> Z1_reg;
-//    rt_bf<1, 16> dl_dZ1_reg;
-//    rt_fl<1, 16> dl_dZ1_fl_reg;
-
-//    rt_fl<1, 16> Z1_bar_term_1_fl_reg;
-//    rt_bf<1, 16> Z1_bar_term_1_reg;
-//    rt_fl<1, 16> Z1_bar_term_2_fl_reg;
-//    rt_bf<1, 16> Z1_bar_term_2_reg;
-
-//    rt_fl<1, 4> Z2_fl_reg;
-//    rt_bf<1, 4> dl_dZ2_reg;
-
-//    rt_fl<1, 4> Z2_bar_term_1_fl_reg;
-//    rt_bf<1, 4> Z2_bar_term_1_reg;
-//    rt_fl<1, 4> Z2_bar_term_2_fl_reg;
-//    rt_bf<1, 4> Z2_bar_term_2_reg;
-
-//    rt_fl<1, 1> Attn_fl_reg;
-//    rt_bf<1, 1> Attn_reg;
-
-    load(W1_col_reg, _W1, W1_col_reg.cols); // 32KB
-    load(W2_col_reg, _W2, W2_col_reg.cols); // 32KB - 64KB
+    load(w1_smem[0], _W1, 256); // W1_col_reg.cols = 256
+    load(W2_col_reg, _W2, W2_col_reg.cols);
 
     for (int i = 0; i < NC; i++) {
         // Forward
+        rt_bf<4, 16, kittens::ducks::rt_layout::col> W1_col_reg;
+        load(W1_col_reg, w1_smem[0]);
         rt_fl<1, 16> Z1_fl_reg; // 16KB - 80KB
         rt_bf<1, 16> Z1_reg; // 8KB - 88KB
         rt_fl<1, 4> Z2_fl_reg; // 4KB - 92KB
         rt_bf<1, 4> XB_reg; // 2KB - 94KB
+
 
         load(XB_reg, _XB + i * X_STRIDE, XB_reg.cols);  // [K,f]
         zero(Z1_fl_reg);  // [K,4f]
@@ -95,6 +76,7 @@ void prefill_whole_loop_ker(
         copy(Z1_reg, Z1_fl_reg); // 16KB - 78KB
         zero(Z2_fl_reg); // [K,f]
         mma_AB(Z2_fl_reg, Z1_reg, W2_col_reg, Z2_fl_reg); // [K,4f]r, [4f,f]c -> [K,f]r
+        store(w1_smem[0], W1_col_reg);
 
         // dl_dZ2
         rt_bf<1, 4> dl_dZ2_reg; // 2KB - 80KB
@@ -149,15 +131,18 @@ void prefill_whole_loop_ker(
         make_causal(Attn_reg, Attn_reg, base_types::constants<bf16>::zero());
 
         // Z1_bar
+        load(W1_col_reg, w1_smem[0]);
         rt_fl<1, 16> Z1_bar_term_1_fl_reg; // 16KB - 165.5KB
         rt_bf<1, 16> Z1_bar_term_1_reg; // 8KB - 173.5KB
         rt_fl<1, 16> Z1_bar_term_2_fl_reg; // 16KB - 189.5KB
         rt_bf<1, 16> Z1_bar_term_2_reg; // 8KB - 197.5KB
 
+        
         zero(Z1_bar_term_1_fl_reg);
         mma_AB(Z1_bar_term_1_fl_reg, XC_reg, W1_col_reg, Z1_bar_term_1_fl_reg);  // [K,f]r, [f,4f]c -> [K,4f]r // 2KB - 195.5KB
         copy(Z1_bar_term_1_reg, Z1_bar_term_1_fl_reg); // 16KB - 179.5KB
         sub(W1_col_reg, W1_col_reg, delta_W1_col_reg); // Updated W1
+        store(w1_smem[0], W1_col_reg);
 
         zero(Z1_bar_term_2_fl_reg);
         mma_AB(Z1_bar_term_2_fl_reg, Attn_reg, dl_dZ1_col_reg, Z1_bar_term_2_fl_reg);  // [K,K]r, [K,f]c -> [K,f]r // 8KB - 171.5KB
@@ -194,7 +179,7 @@ void prefill_whole_loop_ker(
         sub(W2_col_reg, W2_col_reg, delta_W2_col_reg); // 32KB - 68KB (Should be 64KB)
     }
 
-    store(_W1, W1_col_reg, W1_col_reg.cols);
+    store(_W1, w1_smem[0], 256);
     store(_W2, W2_col_reg, W2_col_reg.cols);
 }
 
@@ -237,7 +222,9 @@ prefill_whole_loop
     const __nv_bfloat16* XC_data_ptr = reinterpret_cast<H*> (XC.data_ptr<T>());
     __nv_bfloat16* Output_data_ptr = reinterpret_cast<H*> (Output.data_ptr<T>());
 
-    prefill_whole_loop_ker<<<batch * head, threads, 0, stream>>>(
+    const int shmem_size = W_STRIDE * 2;
+
+    prefill_whole_loop_ker<<<batch * head, threads, shmem_size, stream>>>(
             NC,
             W1_data_ptr, W2_data_ptr,
             XA_data_ptr, XB_data_ptr, XC_data_ptr,
