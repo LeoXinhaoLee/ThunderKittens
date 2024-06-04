@@ -84,40 +84,36 @@ void prefill_whole_loop_ker(
         sub(dl_dZ2_reg, dl_dZ2_reg, XA_reg);  // [K,f]
 
         // delta W2
-//        rt_bf<1, 16, ducks::rt_layout::col> &Z1_col_reg = swap_layout_inplace(Z1_reg);  // [K,f] r -> c
         rt_bf<1, 16, ducks::rt_layout::col> Z1_col_reg;
         swap_layout(Z1_col_reg, Z1_reg);
-//        rt_bf<1, 4, ducks::rt_layout::col> &dl_dZ2_col_reg = swap_layout_inplace(dl_dZ2_reg);  // [K,f] r -> c
         rt_bf<1, 4, ducks::rt_layout::col> dl_dZ2_col_reg;
-        swap_layout(dl_dZ2_col_reg, dl_dZ2_reg);
+        swap_layout(dl_dZ2_col_reg, dl_dZ2_reg);  // cannot in-place swap dl_dZ21_reg since it will be needed later
         zero(delta_W2_fl_reg);
         mma_AtB(delta_W2_fl_reg, Z1_col_reg, dl_dZ2_col_reg, delta_W2_fl_reg);  // ([K,4f]c).t @ [K,f]c -> [4f,f]r
         copy(delta_W2_reg, delta_W2_fl_reg);
-//        rt_bf<16, 4, ducks::rt_layout::col> &delta_W2_col_reg = swap_layout_inplace(delta_W2_reg);
-        rt_bf<16, 4, ducks::rt_layout::col> delta_W2_col_reg;
-        swap_layout(delta_W2_col_reg, delta_W2_reg);
+        rt_bf<16, 4, ducks::rt_layout::col> &delta_W2_col_reg = swap_layout_inplace(delta_W2_reg);  // TODO: tricky
+//        rt_bf<16, 4, ducks::rt_layout::col> delta_W2_col_reg;
+//        swap_layout(delta_W2_col_reg, delta_W2_reg);
 
         // dl_dZ1
         zero(dl_dZ1_fl_reg);
-//        rt_bf<16, 4, kittens::ducks::rt_layout::row> &W2_reg = swap_layout_inplace(W2_col_reg);
-        rt_bf<16, 4, kittens::ducks::rt_layout::row> W2_reg;  // TODO: alternatively, swap in-place twice
+        rt_bf<16, 4, kittens::ducks::rt_layout::row> W2_reg;
         swap_layout(W2_reg, W2_col_reg);
         mma_ABt(dl_dZ1_fl_reg, dl_dZ2_reg, W2_reg, dl_dZ1_fl_reg);  // [K,f]r @ [4f,f]r.t -> [K,4f]r
         copy(dl_dZ1_reg, dl_dZ1_fl_reg);
 
         // delta W1
-//        rt_bf<1, 4, ducks::rt_layout::col> &XB_col_reg = swap_layout_inplace(XB_reg);  // [K,f] r -> c
         rt_bf<1, 4, ducks::rt_layout::col> XB_col_reg;
         swap_layout(XB_col_reg, XB_reg);
-//        rt_bf<1, 16, ducks::rt_layout::col> &dl_dZ1_col_reg = swap_layout_inplace(dl_dZ1_reg);  // [K,4f] r -> c
-        rt_bf<1, 16, ducks::rt_layout::col> dl_dZ1_col_reg;
-        swap_layout(dl_dZ1_col_reg, dl_dZ1_reg);
+        rt_bf<1, 16, ducks::rt_layout::col> &dl_dZ1_col_reg = swap_layout_inplace(dl_dZ1_reg);  // [K,4f]r->c TODO: tricy
+//        rt_bf<1, 16, ducks::rt_layout::col> dl_dZ1_col_reg;
+//        swap_layout(dl_dZ1_col_reg, dl_dZ1_reg);
         zero(delta_W1_fl_reg);
         mma_AtB(delta_W1_fl_reg, XB_col_reg, dl_dZ1_col_reg, delta_W1_fl_reg);  // ([K,f]c).t @ [K,4f]c -> [f,4f]r
         copy(delta_W1_reg, delta_W1_fl_reg);
-//        rt_bf<4, 16, ducks::rt_layout::col> &delta_W1_col_reg = swap_layout_inplace(delta_W1_reg);
-        rt_bf<4, 16, ducks::rt_layout::col> delta_W1_col_reg;
-        swap_layout(delta_W1_col_reg, delta_W1_reg);
+        rt_bf<4, 16, ducks::rt_layout::col> &delta_W1_col_reg = swap_layout_inplace(delta_W1_reg);  // TODO: tricky
+//        rt_bf<4, 16, ducks::rt_layout::col> delta_W1_col_reg;
+//        swap_layout(delta_W1_col_reg, delta_W1_reg);
 
         // Attn1
         load(XC_reg, _XC + i * CS * HF, XC_reg.cols);  // [K,f]
