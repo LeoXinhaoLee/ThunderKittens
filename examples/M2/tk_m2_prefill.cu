@@ -15,69 +15,29 @@ using namespace nvcuda;
 #include <cuda/pipeline>
 #include <cooperative_groups.h>
 
-#define X_STRIDE 1024
-#define W_STRIDE 16384
+#define X_STRIDE 1024   // 16 * 64
+#define W_STRIDE 16384  // 64 * 256
 
 using namespace kittens;
 
 
-//template <typename H, typename T>
-//const int NC,
-//        T* __W1, T* __W2,
-//const T* __XA, const T* __XB, const T* __XC,
-//        T* __Output
+template <typename H, typename T>
 __global__
 void prefill_whole_loop_ker(
         const int NC,
-        __nv_bfloat16* __W1, __nv_bfloat16* __W2,
-        const __nv_bfloat16* __XA, const __nv_bfloat16* __XB, const __nv_bfloat16* __XC,
-        __nv_bfloat16* __Output
+        T* __W1, T* __W2,
+        const T* __XA, const T* __XB, const T* __XC,
+        T* __Output
 ) {
-//    H *_W1       = reinterpret_cast<H*>(__W1) + blockIdx.x * W_STRIDE;
-//    H *_W2       = reinterpret_cast<H*>(__W2) + blockIdx.x * W_STRIDE;
-//    const H *_XA       = reinterpret_cast<const H*>(__XA) + blockIdx.x * NC * X_STRIDE;
-//    const H *_XB       = reinterpret_cast<const H*>(__XB) + blockIdx.x * NC * X_STRIDE;
-//    const H *_XC       = reinterpret_cast<const H*>(__XC) + blockIdx.x * NC * X_STRIDE;
-//    H *_Output = reinterpret_cast<H*>(__Output) + blockIdx.x * NC * X_STRIDE;
-    __nv_bfloat16 *_W1       = __W1 + blockIdx.x * W_STRIDE;
-    __nv_bfloat16 *_W2       = __W2 + blockIdx.x * W_STRIDE;
-    const __nv_bfloat16 *_XA       = __XA + blockIdx.x * NC * X_STRIDE;
-    const __nv_bfloat16 *_XC       = __XC + blockIdx.x * NC * X_STRIDE;
-    const __nv_bfloat16 *_XB       = __XB + blockIdx.x * NC * X_STRIDE;
-    __nv_bfloat16 *_Output = __Output + blockIdx.x * NC * X_STRIDE;
+    H *_W1       = reinterpret_cast<H*>(__W1) + blockIdx.x * W_STRIDE;
+    H *_W2       = reinterpret_cast<H*>(__W2) + blockIdx.x * W_STRIDE;
+    const H *_XA       = reinterpret_cast<const H*>(__XA) + blockIdx.x * NC * X_STRIDE;
+    const H *_XB       = reinterpret_cast<const H*>(__XB) + blockIdx.x * NC * X_STRIDE;
+    const H *_XC       = reinterpret_cast<const H*>(__XC) + blockIdx.x * NC * X_STRIDE;
+    H *_Output = reinterpret_cast<H*>(__Output) + blockIdx.x * NC * X_STRIDE;
 
     rt_bf<4, 16, kittens::ducks::rt_layout::col> W1_col_reg;
-//    rt_fl<4, 16> delta_W1_fl_reg;
-//    rt_bf<4, 16> delta_W1_reg;
-
     rt_bf<16, 4, kittens::ducks::rt_layout::col> W2_col_reg;
-//    rt_fl<16, 4> delta_W2_fl_reg;
-//    rt_bf<16, 4> delta_W2_reg;
-
-//    rt_bf<1, 4> XA_reg;
-//    rt_bf<1, 4> XB_reg;
-//    rt_bf<1, 4> XC_reg;
-
-//    rt_fl<1, 16> Z1_fl_reg;
-//    rt_bf<1, 16> Z1_reg;
-//    rt_bf<1, 16> dl_dZ1_reg;
-//    rt_fl<1, 16> dl_dZ1_fl_reg;
-
-//    rt_fl<1, 16> Z1_bar_term_1_fl_reg;
-//    rt_bf<1, 16> Z1_bar_term_1_reg;
-//    rt_fl<1, 16> Z1_bar_term_2_fl_reg;
-//    rt_bf<1, 16> Z1_bar_term_2_reg;
-
-//    rt_fl<1, 4> Z2_fl_reg;
-//    rt_bf<1, 4> dl_dZ2_reg;
-
-//    rt_fl<1, 4> Z2_bar_term_1_fl_reg;
-//    rt_bf<1, 4> Z2_bar_term_1_reg;
-//    rt_fl<1, 4> Z2_bar_term_2_fl_reg;
-//    rt_bf<1, 4> Z2_bar_term_2_reg;
-
-//    rt_fl<1, 1> Attn_fl_reg;
-//    rt_bf<1, 1> Attn_reg;
 
     load(W1_col_reg, _W1, W1_col_reg.cols);
     load(W2_col_reg, _W2, W2_col_reg.cols);
@@ -223,27 +183,12 @@ prefill_whole_loop
 
     auto threads = workers * kittens::WARP_THREADS;
 
-//    prefill_whole_loop_ker<H, T><<<batch * head, threads, 0, stream>>>(
-//            NC,
-//            W1.data_ptr<T>(), W2.data_ptr<T>(),
-//            XA.data_ptr<T>(), XB.data_ptr<T>(), XC.data_ptr<T>(),
-//            Output.data_ptr<T>()
-//    );
-
-    __nv_bfloat16* W1_data_ptr = reinterpret_cast<H*> (W1.data_ptr<T>());
-    __nv_bfloat16* W2_data_ptr = reinterpret_cast<H*> (W2.data_ptr<T>());
-    const __nv_bfloat16* XA_data_ptr = reinterpret_cast<H*> (XA.data_ptr<T>());
-    const __nv_bfloat16* XB_data_ptr = reinterpret_cast<H*> (XB.data_ptr<T>());
-    const __nv_bfloat16* XC_data_ptr = reinterpret_cast<H*> (XC.data_ptr<T>());
-    __nv_bfloat16* Output_data_ptr = reinterpret_cast<H*> (Output.data_ptr<T>());
-
-    prefill_whole_loop_ker<<<batch * head, threads, 0, stream>>>(
+    prefill_whole_loop_ker<H, T><<<batch * head, threads, 0, stream>>>(
             NC,
-            W1_data_ptr, W2_data_ptr,
-            XA_data_ptr, XB_data_ptr, XC_data_ptr,
-            Output_data_ptr
+            W1.data_ptr<T>(), W2.data_ptr<T>(),
+            XA.data_ptr<T>(), XB.data_ptr<T>(), XC.data_ptr<T>(),
+            Output.data_ptr<T>()
     );
-
 
 }
 
