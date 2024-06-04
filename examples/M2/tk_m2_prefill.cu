@@ -123,75 +123,75 @@ void prefill_whole_loop_ker(
         zero(dl_dZ1_fl_reg);
         rt_bf<16, 4, kittens::ducks::rt_layout::row> W2_reg; // 32KB - 166KB
         swap_layout(W2_reg, W2_col_reg);
-        mma_ABt(dl_dZ1_fl_reg, dl_dZ2_reg, W2_reg, dl_dZ1_fl_reg);  // [K,f]r @ [4f,f]r.t -> [K,4f]r // 32KB - 134KB
-        copy(dl_dZ1_reg, dl_dZ1_fl_reg); // 16KB - 118KB
+        mma_ABt(dl_dZ1_fl_reg, dl_dZ2_reg, W2_reg, dl_dZ1_fl_reg);  // [K,f]r @ [4f,f]r.t -> [K,4f]r // 32KB+2KB - 132KB
+        copy(dl_dZ1_reg, dl_dZ1_fl_reg); // 16KB - 116KB
 
         // delta W1
-        rt_fl<4, 16> delta_W1_fl_reg; // 64KB - 182KB
-        rt_bf<4, 16> delta_W1_reg; // 32KB - 214KB
-        rt_bf<1, 4, ducks::rt_layout::col> XB_col_reg; // 2KB - 216KB
+        rt_fl<4, 16> delta_W1_fl_reg; // 64KB - 180KB
+        rt_bf<4, 16> delta_W1_reg; // 32KB - 212KB
+        rt_bf<1, 4, ducks::rt_layout::col> XB_col_reg; // 2KB - 214KB
         swap_layout(XB_col_reg, XB_reg);
         rt_bf<1, 16, ducks::rt_layout::col> &dl_dZ1_col_reg = swap_layout_inplace(dl_dZ1_reg);  // [K,4f]r->c TODO: tricy
         zero(delta_W1_fl_reg);
-        mma_AtB(delta_W1_fl_reg, XB_col_reg, dl_dZ1_col_reg, delta_W1_fl_reg);  // ([K,f]c).t @ [K,4f]c -> [f,4f]r // 2KB - 214KB
-        copy(delta_W1_reg, delta_W1_fl_reg); // 64KB - 150KB
+        mma_AtB(delta_W1_fl_reg, XB_col_reg, dl_dZ1_col_reg, delta_W1_fl_reg);  // ([K,f]c).t @ [K,4f]c -> [f,4f]r // 2KB - 212KB
+        copy(delta_W1_reg, delta_W1_fl_reg); // 64KB - 148KB
         rt_bf<4, 16, ducks::rt_layout::col> &delta_W1_col_reg = swap_layout_inplace(delta_W1_reg);  // TODO: tricky
 
         // Attn1
-        rt_fl<1, 1> Attn_fl_reg; // 1KB - 151KB
-        rt_bf<1, 1> Attn_reg; // 0.5KB - 151.5KB
-        rt_bf<1, 4> XC_reg; // 2KB - 153.5KB
+        rt_fl<1, 1> Attn_fl_reg; // 1KB - 149KB
+        rt_bf<1, 1> Attn_reg; // 0.5KB - 149.5KB
+        rt_bf<1, 4> XC_reg; // 2KB - 151.5KB
 
         load(XC_reg, _XC + i * X_STRIDE, XC_reg.cols);  // [K,f]
         zero(Attn_fl_reg);  // [K,K]
-        mma_ABt(Attn_fl_reg, XC_reg, XB_reg, Attn_fl_reg);  // [K,f]r @ [K,f]r.t -> [K,K]r // 2KB - 151.5KB
+        mma_ABt(Attn_fl_reg, XC_reg, XB_reg, Attn_fl_reg);  // [K,f]r @ [K,f]r.t -> [K,K]r // 2KB - 149.5KB
         copy(Attn_reg, Attn_fl_reg); 
         make_causal(Attn_reg, Attn_reg, base_types::constants<bf16>::zero());
 
         // Z1_bar
-        rt_fl<1, 16> Z1_bar_term_1_fl_reg; // 16KB - 167.5KB
-        rt_bf<1, 16> Z1_bar_term_1_reg; // 8KB - 175.5KB
-        rt_fl<1, 16> Z1_bar_term_2_fl_reg; // 16KB - 191.5KB
-        rt_bf<1, 16> Z1_bar_term_2_reg; // 8KB - 199.5KB
+        rt_fl<1, 16> Z1_bar_term_1_fl_reg; // 16KB - 165.5KB
+        rt_bf<1, 16> Z1_bar_term_1_reg; // 8KB - 173.5KB
+        rt_fl<1, 16> Z1_bar_term_2_fl_reg; // 16KB - 189.5KB
+        rt_bf<1, 16> Z1_bar_term_2_reg; // 8KB - 197.5KB
 
         zero(Z1_bar_term_1_fl_reg);
-        mma_AB(Z1_bar_term_1_fl_reg, XC_reg, W1_col_reg, Z1_bar_term_1_fl_reg);  // [K,f]r, [f,4f]c -> [K,4f]r // 2KB - 197.5KB
-        copy(Z1_bar_term_1_reg, Z1_bar_term_1_fl_reg); // 16KB - 181.5KB
+        mma_AB(Z1_bar_term_1_fl_reg, XC_reg, W1_col_reg, Z1_bar_term_1_fl_reg);  // [K,f]r, [f,4f]c -> [K,4f]r // 2KB - 195.5KB
+        copy(Z1_bar_term_1_reg, Z1_bar_term_1_fl_reg); // 16KB - 179.5KB
+        sub(W1_col_reg, W1_col_reg, delta_W1_col_reg); // Updated W1
 
         zero(Z1_bar_term_2_fl_reg);
-        mma_AB(Z1_bar_term_2_fl_reg, Attn_reg, dl_dZ1_col_reg, Z1_bar_term_2_fl_reg);  // [K,K]r, [K,f]c -> [K,f]r // 8KB - 173.5KB
-        copy(Z1_bar_term_2_reg, Z1_bar_term_2_fl_reg); // 16KB - 157.5KB
+        mma_AB(Z1_bar_term_2_fl_reg, Attn_reg, dl_dZ1_col_reg, Z1_bar_term_2_fl_reg);  // [K,K]r, [K,f]c -> [K,f]r // 8KB - 171.5KB
+        copy(Z1_bar_term_2_reg, Z1_bar_term_2_fl_reg); // 16KB - 155.5KB
 
-        sub(Z1_bar_term_1_reg, Z1_bar_term_1_reg, Z1_bar_term_2_reg);  // cannot multiplex Z2_bar and Z2_bar_term_1_reg // 8KB - 149.5KB
+        sub(Z1_bar_term_1_reg, Z1_bar_term_1_reg, Z1_bar_term_2_reg);  // cannot multiplex Z2_bar and Z2_bar_term_1_reg // 8KB - 147.5KB
 
         // Attn2
         zero(Attn_fl_reg);  // [K,K]
-        mma_ABt(Attn_fl_reg, Z1_bar_term_1_reg, Z1_reg, Attn_fl_reg);  // [K,K]r, [K,f]r -> [K,f]r // 8KB - 141.5KB
-        copy(Attn_reg, Attn_fl_reg); // 1KB - 140.5KB
+        mma_ABt(Attn_fl_reg, Z1_bar_term_1_reg, Z1_reg, Attn_fl_reg);  // [K,K]r, [K,f]r -> [K,f]r // 8KB - 139.5KB
+        copy(Attn_reg, Attn_fl_reg); // 1KB - 138.5KB
         make_causal(Attn_reg, Attn_reg, base_types::constants<bf16>::zero());
 
         // Z2_bar
-        rt_fl<1, 4> Z2_bar_term_1_fl_reg; // 4KB - 144.5KB
-        rt_bf<1, 4> Z2_bar_term_1_reg; // 2KB - 146.5KB
-        rt_fl<1, 4> Z2_bar_term_2_fl_reg; // 4KB - 150.5KB
-        rt_bf<1, 4> Z2_bar_term_2_reg; // 2KB - 152.5KB
+        rt_fl<1, 4> Z2_bar_term_1_fl_reg; // 4KB - 142.5KB
+        rt_bf<1, 4> Z2_bar_term_1_reg; // 2KB - 144.5KB
+        rt_fl<1, 4> Z2_bar_term_2_fl_reg; // 4KB - 148.5KB
+        rt_bf<1, 4> Z2_bar_term_2_reg; // 2KB - 150.5KB
 
         zero(Z2_bar_term_1_fl_reg);
-        mma_AB(Z2_bar_term_1_fl_reg, Z1_bar_term_1_reg, W2_col_reg, Z2_bar_term_1_fl_reg); // 8KB - 144.5KB
-        copy(Z2_bar_term_1_reg, Z2_bar_term_1_fl_reg); // 4KB - 140.5KB
+        mma_AB(Z2_bar_term_1_fl_reg, Z1_bar_term_1_reg, W2_col_reg, Z2_bar_term_1_fl_reg); // 8KB - 142.5KB
+        copy(Z2_bar_term_1_reg, Z2_bar_term_1_fl_reg); // 4KB - 138.5KB
 
         zero(Z2_bar_term_2_fl_reg);
-        mma_AB(Z2_bar_term_2_fl_reg, Attn_reg, dl_dZ2_col_reg, Z2_bar_term_2_fl_reg); // 2.5KB - 142KB
-        copy(Z2_bar_term_2_reg, Z2_bar_term_2_fl_reg); // 4KB - 138KB
+        mma_AB(Z2_bar_term_2_fl_reg, Attn_reg, dl_dZ2_col_reg, Z2_bar_term_2_fl_reg); // 2.5KB - 140KB
+        copy(Z2_bar_term_2_reg, Z2_bar_term_2_fl_reg); // 4KB - 136KB
 
-        sub(Z2_bar_term_1_reg, Z2_bar_term_1_reg, Z2_bar_term_2_reg);  // cannot multiplex Z2_bar and Z2_bar_term_1_reg // 2KB - 136KB
+        sub(Z2_bar_term_1_reg, Z2_bar_term_1_reg, Z2_bar_term_2_reg);  // cannot multiplex Z2_bar and Z2_bar_term_1_reg // 2KB - 134KB
  
         // Store Output
-        store(_Output + i * X_STRIDE, Z2_bar_term_1_reg, Z2_bar_term_1_reg.cols); // 2KB - 134KB
+        store(_Output + i * X_STRIDE, Z2_bar_term_1_reg, Z2_bar_term_1_reg.cols); // 2KB - 132KB
 
         // Updated W1, W2
-        sub(W1_col_reg, W1_col_reg, delta_W1_col_reg); // 32KB - 102KB
-        sub(W2_col_reg, W2_col_reg, delta_W2_col_reg); // 32KB - 70KB (Should be 64KB)
+        sub(W2_col_reg, W2_col_reg, delta_W2_col_reg); // 32KB - 68KB (Should be 64KB)
     }
 
     store(_W1, W1_col_reg, W1_col_reg.cols);
