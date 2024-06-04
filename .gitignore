@@ -12,6 +12,6 @@ examples/M1_loop_one_body/tk_m1_prefill.egg-info/
 examples/M2/build/
 examples/M2/dist/
 examples/M2/tk_m2_prefill.egg-info/
-examples/M2/*backup.py
+examples/M2/*backup.cu
 src/common/pyutils/__pycache__/
 examples/.DS_Store
