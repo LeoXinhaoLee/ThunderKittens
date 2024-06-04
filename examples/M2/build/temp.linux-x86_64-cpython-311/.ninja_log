@@ -1,3 +1,3 @@
 # ninja log v5
-0	17852	1717524550803852227	/home/ubuntu/genghan/ThunderKittens/examples/M2/build/temp.linux-x86_64-cpython-311/tk_m2_prefill_frontend.o	b27cca432f21493b
-0	64758	1717524597688799357	/home/ubuntu/genghan/ThunderKittens/examples/M2/build/temp.linux-x86_64-cpython-311/tk_m2_prefill.o	f534e46a7dc26674
+1	17702	1717526245654504122	/home/ubuntu/genghan/ThunderKittens/examples/M2/build/temp.linux-x86_64-cpython-311/tk_m2_prefill_frontend.o	b27cca432f21493b
+0	61561	1717526289491282770	/home/ubuntu/genghan/ThunderKittens/examples/M2/build/temp.linux-x86_64-cpython-311/tk_m2_prefill.o	f534e46a7dc26674

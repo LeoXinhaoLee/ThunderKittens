@@ -49,21 +49,22 @@ void prefill_whole_loop_ker(
     rt_bf<4, 16, kittens::ducks::rt_layout::col> W1_col_reg;
     rt_bf<16, 4, kittens::ducks::rt_layout::col> W2_col_reg;
 
-    extern __shared__ alignment_dummy __shm[]; // this is the CUDA shared memory
-    shared_allocator al((int*)&__shm[0]);
+    rt_bf<1, 4> XB_reg;
+    rt_bf<1, 4> XA_reg;
+    rt_bf<1, 4> XC_reg;
 
-    st_bf<16, 4, ducks::st_layout::swizzle> (&delta_w2_smem)[1] = al.allocate<st_bf<16, 4, ducks::st_layout::swizzle>, 1>();
     load(W1_col_reg, _W1, W1_col_reg.cols);
     load(W2_col_reg, _W2, W2_col_reg.cols);
+    load(XB_reg, _XB, XB_reg.cols);  // [K,f]
+    load(XA_reg, _XA, XA_reg.cols); 
+    load(XC_reg, _XC, XC_reg.cols);
 
     for (int i = 0; i < NC; i++) {
         // Forward
         rt_fl<1, 16> Z1_fl_reg;
         rt_bf<1, 16> Z1_reg;
         rt_fl<1, 4> Z2_fl_reg;
-        rt_bf<1, 4> XB_reg;
-
-        load(XB_reg, _XB + i * X_STRIDE, XB_reg.cols);  // [K,f]
+        // load(XB_reg, _XB + i * X_STRIDE, XB_reg.cols);  // [K,f]
         zero(Z1_fl_reg);  // [K,4f]
         mma_AB(Z1_fl_reg, XB_reg, W1_col_reg, Z1_fl_reg); // [K,f]r, [f,4f]c -> [K,4f]r
         copy(Z1_reg, Z1_fl_reg);
@@ -72,12 +73,12 @@ void prefill_whole_loop_ker(
 
         // dl_dZ2
         rt_bf<1, 4> dl_dZ2_reg;
-        rt_bf<1, 4> XA_reg;
-
-        load(XA_reg, _XA + i * X_STRIDE, XA_reg.cols);  // [K,f]
+        // load(XA_reg, _XA + i * X_STRIDE, XA_reg.cols);  // [K,f]
         copy(dl_dZ2_reg, Z2_fl_reg);
         sub(dl_dZ2_reg, dl_dZ2_reg, XA_reg);  // [K,f]
-
+        if (i < NC - 1) {
+            load(XA_reg, _XA + (i + 1) * X_STRIDE, XA_reg.cols);
+        }
         // delta W2
         rt_fl<16, 4> delta_W2_fl_reg;
         rt_bf<16, 4> delta_W2_reg;
@@ -89,7 +90,6 @@ void prefill_whole_loop_ker(
         mma_AtB(delta_W2_fl_reg, Z1_col_reg, dl_dZ2_col_reg, delta_W2_fl_reg);  // ([K,4f]c).t @ [K,f]c -> [4f,f]r
         copy(delta_W2_reg, delta_W2_fl_reg);
         rt_bf<16, 4, ducks::rt_layout::col> &delta_W2_col_reg = swap_layout_inplace(delta_W2_reg);  // TODO: tricky
-        store(delta_w2_smem[0], delta_W2_col_reg);
 
         // dl_dZ1
         rt_bf<1, 16> dl_dZ1_reg;
@@ -106,6 +106,7 @@ void prefill_whole_loop_ker(
         rt_bf<4, 16> delta_W1_reg;
         rt_bf<1, 4, ducks::rt_layout::col> XB_col_reg;
         swap_layout(XB_col_reg, XB_reg);
+
         rt_bf<1, 16, ducks::rt_layout::col> &dl_dZ1_col_reg = swap_layout_inplace(dl_dZ1_reg);  // [K,4f]r->c TODO: tricy
         zero(delta_W1_fl_reg);
         mma_AtB(delta_W1_fl_reg, XB_col_reg, dl_dZ1_col_reg, delta_W1_fl_reg);  // ([K,f]c).t @ [K,4f]c -> [f,4f]r
@@ -115,13 +116,14 @@ void prefill_whole_loop_ker(
         // Attn1
         rt_fl<1, 1> Attn_fl_reg;
         rt_bf<1, 1> Attn_reg;
-        rt_bf<1, 4> XC_reg;
-
-        load(XC_reg, _XC + i * X_STRIDE, XC_reg.cols);  // [K,f]
+        // load(XC_reg, _XC + i * X_STRIDE, XC_reg.cols);  // [K,f]
         zero(Attn_fl_reg);  // [K,K]
         mma_ABt(Attn_fl_reg, XC_reg, XB_reg, Attn_fl_reg);  // [K,f]r @ [K,f]r.t -> [K,K]r
         copy(Attn_reg, Attn_fl_reg);
         make_causal(Attn_reg, Attn_reg, base_types::constants<bf16>::zero());
+        if (i < NC - 1) {
+            load(XB_reg, _XB + (i + 1) * X_STRIDE, XB_reg.cols); 
+        }
 
         // Z1_bar
         rt_fl<1, 16> Z1_bar_term_1_fl_reg;
@@ -131,6 +133,9 @@ void prefill_whole_loop_ker(
 
         zero(Z1_bar_term_1_fl_reg);
         mma_AB(Z1_bar_term_1_fl_reg, XC_reg, W1_col_reg, Z1_bar_term_1_fl_reg);  // [K,f]r, [f,4f]c -> [K,4f]r
+        if (i < NC -1) {
+            load(XC_reg, _XC + (i + 1) * X_STRIDE, XC_reg.cols);
+        }
         copy(Z1_bar_term_1_reg, Z1_bar_term_1_fl_reg);
         sub(W1_col_reg, W1_col_reg, delta_W1_col_reg); // Updated W1
 
@@ -166,7 +171,6 @@ void prefill_whole_loop_ker(
         store(_Output + i * X_STRIDE, Z2_bar_term_1_reg, Z2_bar_term_1_reg.cols);
 
         // Updated W2
-        load(delta_W2_col_reg, delta_w2_smem[0]);
         sub(W2_col_reg, W2_col_reg, delta_W2_col_reg);
     }
 
@@ -213,7 +217,7 @@ prefill_whole_loop
     const __nv_bfloat16* XC_data_ptr = reinterpret_cast<H*> (XC.data_ptr<T>());
     __nv_bfloat16* Output_data_ptr = reinterpret_cast<H*> (Output.data_ptr<T>());
 
-    const int shmem_size = 64 * 256 * 2;
+    const int shmem_size = 0;
 
     prefill_whole_loop_ker<<<batch * head, threads, shmem_size, stream>>>(
             NC,
