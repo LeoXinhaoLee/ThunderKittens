@@ -48,8 +48,14 @@ void prefill_whole_loop_ker(
 
     int tic = 0, toc = 1;
     auto block = cooperative_groups::this_thread_block();
-    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> qkv_barrier;
-    if (threadIdx.x == 0) {init(&qkv_barrier, block.size());}
+    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> a_barrier;
+    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> b_barrier;
+    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> c_barrier;
+    if (threadIdx.x == 0) {
+        init(&a_barrier, block.size());
+        init(&b_barrier, block.size());
+        init(&c_barrier, block.size());
+    }
     block.sync();
 
     rt_bf<4, 16, kittens::ducks::rt_layout::col> W1_col_reg;
@@ -59,25 +65,12 @@ void prefill_whole_loop_ker(
     load(W2_col_reg, _W2, W2_col_reg.cols); // 32KB - 64KB
 
     for (int j = 0; j < SMEM_POOL; j++) {
-        load_async(XA_smem[tic][j], _XA + j * X_STRIDE, 64,  qkv_barrier);
-        load_async(XB_smem[tic][j], _XB + j * X_STRIDE, 64,  qkv_barrier);
-        load_async(XC_smem[tic][j], _XC + j * X_STRIDE, 64,  qkv_barrier);
+        load_async(XA_smem[tic][j], _XA + j * X_STRIDE, 64,  a_barrier);
+        load_async(XB_smem[tic][j], _XB + j * X_STRIDE, 64,  b_barrier);
+        load_async(XC_smem[tic][j], _XC + j * X_STRIDE, 64,  c_barrier);
     }
 
     for (int i = 0; i < NC; i++) {
-
-        qkv_barrier.arrive_and_wait();
-
-        if (i % SMEM_POOL == 0) {
-            for (int j = 0; j < SMEM_POOL; j++) {
-                int cur_offset = i + SMEM_POOL + j;
-                if (cur_offset < NC) {
-                    load_async(XA_smem[toc][j], _XA + cur_offset * X_STRIDE, 64, qkv_barrier);
-                    load_async(XB_smem[toc][j], _XB + cur_offset * X_STRIDE, 64, qkv_barrier);
-                    load_async(XC_smem[toc][j], _XC + cur_offset * X_STRIDE, 64, qkv_barrier);
-                }
-            }
-        }
 
         // Forward
         rt_fl<1, 16> Z1_fl_reg; // 16KB - 80KB
@@ -85,7 +78,15 @@ void prefill_whole_loop_ker(
         rt_fl<1, 4> Z2_fl_reg; // 4KB - 92KB
         rt_bf<1, 4> XB_reg; // 2KB - 94KB
 
-//        load(XB_reg, _XB + i * X_STRIDE, XB_reg.cols);  // [K,f]
+        b_barrier.arrive_and_wait();
+        if (i % SMEM_POOL == 0) {
+            for (int j = 0; j < SMEM_POOL; j++) {
+                int cur_offset = i + SMEM_POOL + j;
+                if (cur_offset < NC) {
+                    load_async(XB_smem[toc][j], _XB + cur_offset * X_STRIDE, 64, b_barrier);
+                }
+            }
+        }
         load(XB_reg, XB_smem[tic][i % SMEM_POOL]);
         zero(Z1_fl_reg);  // [K,4f]
         mma_AB(Z1_fl_reg, XB_reg, W1_col_reg, Z1_fl_reg); // [K,f]r, [f,4f]c -> [K,4f]r
@@ -97,7 +98,15 @@ void prefill_whole_loop_ker(
         rt_bf<1, 4> dl_dZ2_reg; // 2KB - 80KB
         rt_bf<1, 4> XA_reg; // 2KB - 82KB
 
-//        load(XA_reg, _XA + i * X_STRIDE, XA_reg.cols);  // [K,f]
+        a_barrier.arrive_and_wait();
+        if (i % SMEM_POOL == 0) {
+            for (int j = 0; j < SMEM_POOL; j++) {
+                int cur_offset = i + SMEM_POOL + j;
+                if (cur_offset < NC) {
+                    load_async(XA_smem[toc][j], _XA + cur_offset * X_STRIDE, 64, a_barrier);
+                }
+            }
+        }
         load(XA_reg, XA_smem[tic][i % SMEM_POOL]);
         copy(dl_dZ2_reg, Z2_fl_reg); // 4KB - 78KB
         sub(dl_dZ2_reg, dl_dZ2_reg, XA_reg);  // [K,f] // 2KB - 76KB
@@ -140,7 +149,15 @@ void prefill_whole_loop_ker(
         rt_bf<1, 1> Attn_reg; // 0.5KB - 149.5KB
         rt_bf<1, 4> XC_reg; // 2KB - 151.5KB
 
-//        load(XC_reg, _XC + i * X_STRIDE, XC_reg.cols);  // [K,f]
+        c_barrier.arrive_and_wait();
+        if (i % SMEM_POOL == 0) {
+            for (int j = 0; j < SMEM_POOL; j++) {
+                int cur_offset = i + SMEM_POOL + j;
+                if (cur_offset < NC) {
+                    load_async(XC_smem[toc][j], _XC + cur_offset * X_STRIDE, 64, c_barrier);
+                }
+            }
+        }
         load(XC_reg, XC_smem[tic][i % SMEM_POOL]);
         zero(Attn_fl_reg);  // [K,K]
         mma_ABt(Attn_fl_reg, XC_reg, XB_reg, Attn_fl_reg);  // [K,f]r @ [K,f]r.t -> [K,K]r // 2KB - 149.5KB

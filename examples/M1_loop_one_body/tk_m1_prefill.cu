@@ -244,7 +244,7 @@ prefill_whole_loop
 
     auto threads = workers * kittens::WARP_THREADS;
 
-    std::cout << "M1 TK whole loop" << std::endl;
+//    std::cout << "M1 TK whole loop" << std::endl;
 
     prefill_whole_loop_ker<H, T><<<batch * head, threads, 0, stream>>>(
             NC, CS, HF,
