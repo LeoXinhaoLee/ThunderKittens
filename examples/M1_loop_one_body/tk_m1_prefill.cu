@@ -2,6 +2,7 @@
 #include <math.h>
 #include <assert.h>
 //#include <mma_AB.h>
+#include <string>
 #include <cuda_runtime_api.h>
 #include <mma.h>
 #include <cuda_fp16.h>
@@ -115,7 +116,6 @@ prefill_loop_body
     using H = __nv_bfloat16;
     using T = c10::BFloat16;
     const int workers = 1;
-
     auto threads = workers * kittens::WARP_THREADS;
 
     prefill_loop_body_ker<H,T><<<batch_mul_head, threads, 0, stream>>>(
@@ -243,6 +243,8 @@ prefill_whole_loop
     const int workers = 1;
 
     auto threads = workers * kittens::WARP_THREADS;
+
+    std::cout << "M1 TK whole loop" << std::endl;
 
     prefill_whole_loop_ker<H, T><<<batch * head, threads, 0, stream>>>(
             NC, CS, HF,
