@@ -18,7 +18,7 @@ using namespace nvcuda;
 #define X_STRIDE 1024   // 16 * 64
 #define W_STRIDE 16384  // 64 * 256
 #define SMEM_POOL 1
-#define SMEM_BLOCK 3 * SMEM_POOL * X_STRIDE * 2  // bytes
+#define SMEM_BLOCK 2 * 3 * SMEM_POOL * X_STRIDE * 2  // bytes
 
 using namespace kittens;
 
@@ -42,9 +42,15 @@ void prefill_whole_loop_ker(
     shared_allocator al((int*)&__shm[0]);
 
     // SMEM: 3x Sx (16 * 64 * 2B) = 6S KB <= 164KB / 8 blocks = 20 -> S <=3
-    st_bf<1, 4, ducks::st_layout::swizzle> (&XA_smem)[SMEM_POOL] = al.allocate<st_bf<1, 4, ducks::st_layout::swizzle>, SMEM_POOL>();
-    st_bf<1, 4, ducks::st_layout::swizzle> (&XB_smem)[SMEM_POOL] = al.allocate<st_bf<1, 4, ducks::st_layout::swizzle>, SMEM_POOL>();
-    st_bf<1, 4, ducks::st_layout::swizzle> (&XC_smem)[SMEM_POOL] = al.allocate<st_bf<1, 4, ducks::st_layout::swizzle>, SMEM_POOL>();
+    st_bf<1, 4, ducks::st_layout::swizzle> (&XA_smem)[2][SMEM_POOL] = al.allocate<st_bf<1, 4, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
+    st_bf<1, 4, ducks::st_layout::swizzle> (&XB_smem)[2][SMEM_POOL] = al.allocate<st_bf<1, 4, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
+    st_bf<1, 4, ducks::st_layout::swizzle> (&XC_smem)[2][SMEM_POOL] = al.allocate<st_bf<1, 4, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
+
+    int tic = 0, toc = 1;
+    auto block = cooperative_groups::this_thread_block();
+    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> qkv_barrier;
+    if (threadIdx.x == 0) {init(&qkv_barrier, block.size());}
+    block.sync();
 
     rt_bf<4, 16, kittens::ducks::rt_layout::col> W1_col_reg;
     rt_bf<16, 4, kittens::ducks::rt_layout::col> W2_col_reg;
@@ -52,13 +58,24 @@ void prefill_whole_loop_ker(
     load(W1_col_reg, _W1, W1_col_reg.cols); // 32KB
     load(W2_col_reg, _W2, W2_col_reg.cols); // 32KB - 64KB
 
+    for (int j = 0; j < SMEM_POOL; j++) {
+        load_async(XA_smem[tic][j], _XA + j * X_STRIDE, 64,  qkv_barrier);
+        load_async(XB_smem[tic][j], _XB + j * X_STRIDE, 64,  qkv_barrier);
+        load_async(XC_smem[tic][j], _XC + j * X_STRIDE, 64,  qkv_barrier);
+    }
+
     for (int i = 0; i < NC; i++) {
+
+        qkv_barrier.arrive_and_wait();
 
         if (i % SMEM_POOL == 0) {
             for (int j = 0; j < SMEM_POOL; j++) {
-                load(XA_smem[j], _XA + (i + j) * X_STRIDE, 64);
-                load(XB_smem[j], _XB + (i + j) * X_STRIDE, 64);
-                load(XC_smem[j], _XC + (i + j) * X_STRIDE, 64);
+                int cur_offset = i + SMEM_POOL + j;
+                if (cur_offset < NC) {
+                    load_async(XA_smem[toc][j], _XA + cur_offset * X_STRIDE, 64, qkv_barrier);
+                    load_async(XB_smem[toc][j], _XB + cur_offset * X_STRIDE, 64, qkv_barrier);
+                    load_async(XC_smem[toc][j], _XC + cur_offset * X_STRIDE, 64, qkv_barrier);
+                }
             }
         }
 
@@ -69,7 +86,7 @@ void prefill_whole_loop_ker(
         rt_bf<1, 4> XB_reg; // 2KB - 94KB
 
 //        load(XB_reg, _XB + i * X_STRIDE, XB_reg.cols);  // [K,f]
-        load(XB_reg, XB_smem[i % SMEM_POOL]);
+        load(XB_reg, XB_smem[tic][i % SMEM_POOL]);
         zero(Z1_fl_reg);  // [K,4f]
         mma_AB(Z1_fl_reg, XB_reg, W1_col_reg, Z1_fl_reg); // [K,f]r, [f,4f]c -> [K,4f]r
         copy(Z1_reg, Z1_fl_reg); // 16KB - 78KB
@@ -81,7 +98,7 @@ void prefill_whole_loop_ker(
         rt_bf<1, 4> XA_reg; // 2KB - 82KB
 
 //        load(XA_reg, _XA + i * X_STRIDE, XA_reg.cols);  // [K,f]
-        load(XA_reg, XA_smem[i % SMEM_POOL]);
+        load(XA_reg, XA_smem[tic][i % SMEM_POOL]);
         copy(dl_dZ2_reg, Z2_fl_reg); // 4KB - 78KB
         sub(dl_dZ2_reg, dl_dZ2_reg, XA_reg);  // [K,f] // 2KB - 76KB
 
@@ -124,7 +141,7 @@ void prefill_whole_loop_ker(
         rt_bf<1, 4> XC_reg; // 2KB - 151.5KB
 
 //        load(XC_reg, _XC + i * X_STRIDE, XC_reg.cols);  // [K,f]
-        load(XC_reg, XC_smem[i % SMEM_POOL]);
+        load(XC_reg, XC_smem[tic][i % SMEM_POOL]);
         zero(Attn_fl_reg);  // [K,K]
         mma_ABt(Attn_fl_reg, XC_reg, XB_reg, Attn_fl_reg);  // [K,f]r @ [K,f]r.t -> [K,K]r // 2KB - 149.5KB
         copy(Attn_reg, Attn_fl_reg);
@@ -163,6 +180,9 @@ void prefill_whole_loop_ker(
         mma_AB(Z2_bar_term_1_fl_reg, Z1_bar_term_1_reg, W2_col_reg, Z2_bar_term_1_fl_reg); // 8KB - 142.5KB
         copy(Z2_bar_term_1_reg, Z2_bar_term_1_fl_reg); // 4KB - 138.5KB
 
+        // Updated W1, W2
+        sub(W2_col_reg, W2_col_reg, delta_W2_col_reg); // 32KB - 68KB (Should be 64KB)
+
         zero(Z2_bar_term_2_fl_reg);
         mma_AB(Z2_bar_term_2_fl_reg, Attn_reg, dl_dZ2_col_reg, Z2_bar_term_2_fl_reg); // 2.5KB - 140KB
         copy(Z2_bar_term_2_reg, Z2_bar_term_2_fl_reg); // 4KB - 136KB
@@ -172,8 +192,10 @@ void prefill_whole_loop_ker(
         // Store Output
         store(_Output + i * X_STRIDE, Z2_bar_term_1_reg, Z2_bar_term_1_reg.cols); // 2KB - 132KB
 
-        // Updated W1, W2
-        sub(W2_col_reg, W2_col_reg, delta_W2_col_reg); // 32KB - 68KB (Should be 64KB)
+        if ((i + 1) % SMEM_POOL == 0){
+            tic ^= 1;
+            toc ^= 1;
+        }
     }
 
     store(_W1, W1_col_reg, W1_col_reg.cols);
