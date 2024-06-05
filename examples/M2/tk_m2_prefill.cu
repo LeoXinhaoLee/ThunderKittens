@@ -48,13 +48,19 @@ void prefill_whole_loop_ker(
 
     int tic = 0, toc = 1;
     auto block = cooperative_groups::this_thread_block();
-    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> a_barrier;
-    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> b_barrier;
-    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> c_barrier;
+    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> a_barrier_tic;
+    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> b_barrier_tic;
+    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> c_barrier_tic;
+    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> a_barrier_toc;
+    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> b_barrier_toc;
+    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> c_barrier_toc;
     if (threadIdx.x == 0) {
-        init(&a_barrier, block.size());
-        init(&b_barrier, block.size());
-        init(&c_barrier, block.size());
+        init(&a_barrier_tic, block.size());
+        init(&b_barrier_tic, block.size());
+        init(&c_barrier_tic, block.size());
+        init(&a_barrier_toc, block.size());
+        init(&b_barrier_toc, block.size());
+        init(&c_barrier_toc, block.size());
     }
     block.sync();
 
@@ -65,9 +71,9 @@ void prefill_whole_loop_ker(
     load(W2_col_reg, _W2, W2_col_reg.cols); // 32KB - 64KB
 
     for (int j = 0; j < SMEM_POOL; j++) {
-        load_async(XA_smem[tic][j], _XA + j * X_STRIDE, 64,  a_barrier);
-        load_async(XB_smem[tic][j], _XB + j * X_STRIDE, 64,  b_barrier);
-        load_async(XC_smem[tic][j], _XC + j * X_STRIDE, 64,  c_barrier);
+        load_async(XA_smem[tic][j], _XA + j * X_STRIDE, 64,  a_barrier_tic);
+        load_async(XB_smem[tic][j], _XB + j * X_STRIDE, 64,  b_barrier_tic);
+        load_async(XC_smem[tic][j], _XC + j * X_STRIDE, 64,  c_barrier_tic);
     }
 
     for (int i = 0; i < NC; i++) {
@@ -78,15 +84,28 @@ void prefill_whole_loop_ker(
         rt_fl<1, 4> Z2_fl_reg; // 4KB - 92KB
         rt_bf<1, 4> XB_reg; // 2KB - 94KB
 
-        b_barrier.arrive_and_wait();
         if (i % SMEM_POOL == 0) {
             for (int j = 0; j < SMEM_POOL; j++) {
                 int cur_offset = i + SMEM_POOL + j;
                 if (cur_offset < NC) {
-                    load_async(XB_smem[toc][j], _XB + cur_offset * X_STRIDE, 64, b_barrier);
+                    if (toc == 1) {
+                        load_async(XA_smem[toc][j], _XA + cur_offset * X_STRIDE, 64, a_barrier_toc);
+                        load_async(XB_smem[toc][j], _XB + cur_offset * X_STRIDE, 64, b_barrier_toc);
+                        load_async(XC_smem[toc][j], _XC + cur_offset * X_STRIDE, 64, c_barrier_toc);
+                    }
+                    else {
+                        load_async(XA_smem[toc][j], _XA + cur_offset * X_STRIDE, 64, a_barrier_tic);
+                        load_async(XB_smem[toc][j], _XB + cur_offset * X_STRIDE, 64, b_barrier_tic);
+                        load_async(XC_smem[toc][j], _XC + cur_offset * X_STRIDE, 64, c_barrier_tic);
+                    }
                 }
             }
         }
+
+        if (tic == 0)
+            b_barrier_tic.arrive_and_wait();
+        else
+            b_barrier_toc.arrive_and_wait();
         load(XB_reg, XB_smem[tic][i % SMEM_POOL]);
         zero(Z1_fl_reg);  // [K,4f]
         mma_AB(Z1_fl_reg, XB_reg, W1_col_reg, Z1_fl_reg); // [K,f]r, [f,4f]c -> [K,4f]r
@@ -98,15 +117,10 @@ void prefill_whole_loop_ker(
         rt_bf<1, 4> dl_dZ2_reg; // 2KB - 80KB
         rt_bf<1, 4> XA_reg; // 2KB - 82KB
 
-        a_barrier.arrive_and_wait();
-        if (i % SMEM_POOL == 0) {
-            for (int j = 0; j < SMEM_POOL; j++) {
-                int cur_offset = i + SMEM_POOL + j;
-                if (cur_offset < NC) {
-                    load_async(XA_smem[toc][j], _XA + cur_offset * X_STRIDE, 64, a_barrier);
-                }
-            }
-        }
+        if (tic == 0)
+            a_barrier_tic.arrive_and_wait();
+        else
+            a_barrier_toc.arrive_and_wait();
         load(XA_reg, XA_smem[tic][i % SMEM_POOL]);
         copy(dl_dZ2_reg, Z2_fl_reg); // 4KB - 78KB
         sub(dl_dZ2_reg, dl_dZ2_reg, XA_reg);  // [K,f] // 2KB - 76KB
@@ -149,15 +163,10 @@ void prefill_whole_loop_ker(
         rt_bf<1, 1> Attn_reg; // 0.5KB - 149.5KB
         rt_bf<1, 4> XC_reg; // 2KB - 151.5KB
 
-        c_barrier.arrive_and_wait();
-        if (i % SMEM_POOL == 0) {
-            for (int j = 0; j < SMEM_POOL; j++) {
-                int cur_offset = i + SMEM_POOL + j;
-                if (cur_offset < NC) {
-                    load_async(XC_smem[toc][j], _XC + cur_offset * X_STRIDE, 64, c_barrier);
-                }
-            }
-        }
+        if (tic == 0)
+            c_barrier_tic.arrive_and_wait();
+        else
+            c_barrier_toc.arrive_and_wait();
         load(XC_reg, XC_smem[tic][i % SMEM_POOL]);
         zero(Attn_fl_reg);  // [K,K]
         mma_ABt(Attn_fl_reg, XC_reg, XB_reg, Attn_fl_reg);  // [K,f]r @ [K,f]r.t -> [K,K]r // 2KB - 149.5KB
