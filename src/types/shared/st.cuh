@@ -80,7 +80,7 @@ struct KITTENS_DEFAULT_ALIGN st {
     );
 
     // wgmma layout with swizzling
-    dtype data[rows*cols]; ///< Raw data storage for the tile.
+    bf16 data[rows*cols]; ///< Raw data storage for the tile.
 
     /**
      * @brief Access a shared tile element using a row and column, as if the tile were row-major.
@@ -89,10 +89,10 @@ struct KITTENS_DEFAULT_ALIGN st {
      * indexing calculations for swizzled or strangely ordered layouts.
      */
     __device__ inline       dtype& operator[](const int2 &rowcol)       {
-        return *detail::shared_indexer<height, width, layout>::idx(data, rowcol.x, rowcol.y);
+        return *(dtype*)detail::shared_indexer<height, width, layout>::idx(data, rowcol.x, rowcol.y);
     }
     __device__ inline const dtype& operator[](const int2 &rowcol) const {
-        return *(const bf16*)detail::shared_indexer<height, width, layout>::idx((bf16*)data, rowcol.x, rowcol.y);
+        return *(const dtype*)detail::shared_indexer<height, width, layout>::idx((bf16*)data, rowcol.x, rowcol.y);
     }
     __device__ inline       dtype& operator[](int idx)       {
         return data[idx];
@@ -146,7 +146,7 @@ struct st_subtile {
     static constexpr int cols                = width  * kittens::TILE_DIM;
     static constexpr int num_elements        = rows * cols;
 
-    dtype *data;
+    bf16 *data;
     int row_offset, col_offset;
 
     __device__ st_subtile(dtype *src, int _row_offset, int _col_offset) {
@@ -156,12 +156,12 @@ struct st_subtile {
     }
 
     __device__ inline       dtype& operator[](const int2 &rowcol)       {
-        return *detail::shared_indexer<underlying_height, underlying_width, layout>::idx(
+        return *(dtype*)detail::shared_indexer<underlying_height, underlying_width, layout>::idx(
             (bf16*)data, rowcol.x+row_offset, rowcol.y+col_offset
         );
     }
     __device__ inline const dtype& operator[](const int2 &rowcol) const {
-        return *(const bf16*)detail::shared_indexer<underlying_height, underlying_width, layout>::idx(
+        return *(const dtype*)detail::shared_indexer<underlying_height, underlying_width, layout>::idx(
             (bf16*)data, rowcol.x+row_offset, rowcol.y+col_offset
         );
     }
@@ -196,6 +196,7 @@ template<typename T> concept all = requires {
 /* ----------  WRAPPERS FOR PRETTINESS  ---------- */
 
 template<int _height, int _width, ducks::st_layout::all layout=ducks::st_layout::swizzle> using st_bf = st<bf16, _height, _width, layout>; // prelim tests indicate this is fastest default
+template<int _height, int _width, ducks::st_layout::all layout=ducks::st_layout::swizzle> using st_hf = st<half, _height, _width, layout>;
 
 template<ducks::st_layout::all layout=ducks::st_layout::swizzle> using st_bf_1x1 = st_bf<1, 1, layout>;
 template<ducks::st_layout::all layout=ducks::st_layout::swizzle> using st_bf_1x2 = st_bf<1, 2, layout>;
