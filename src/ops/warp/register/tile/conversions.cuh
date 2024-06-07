@@ -29,6 +29,14 @@ __device__ inline void swap_layout_8(bf16_2 &dst, const bf16_2 &src) {
     :   "r"(*(uint32_t*)(&src))
     );
 }
+
+__device__ inline void swap_layout_8(half_2 &dst, const half_2 &src) {
+    asm volatile (
+        "movmatrix.sync.aligned.m8n8.trans.b16 %0, %1;\n"
+    :   "+r"(*(uint32_t*)(&dst))
+    :   "r"(*(uint32_t*)(&src))
+    );
+}
 /**
  * @brief Swaps the layout of a register base tile.
  *
