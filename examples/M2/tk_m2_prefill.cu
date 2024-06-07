@@ -154,13 +154,16 @@ void prefill_whole_loop_ker(
         // Z2_bar
         rt_fl<1, 4> Z2_bar_term_1_fl_reg;
         rt_bf<1, 4> Z2_bar_term_1_reg;
-        rt_fl<1, 4> Z2_bar_term_2_fl_reg;
-        rt_bf<1, 4> Z2_bar_term_2_reg;
+
 
         zero(Z2_bar_term_1_fl_reg);
         mma_AB(Z2_bar_term_1_fl_reg, Z1_bar_term_1_reg, W2_col_reg, Z2_bar_term_1_fl_reg);
         copy(Z2_bar_term_1_reg, Z2_bar_term_1_fl_reg);
-
+        // Updated W2
+        sub(W2_col_reg, W2_col_reg, delta_W2_col_reg);
+        
+        rt_fl<1, 4> Z2_bar_term_2_fl_reg;
+        rt_bf<1, 4> Z2_bar_term_2_reg;
         zero(Z2_bar_term_2_fl_reg);
         mma_AB(Z2_bar_term_2_fl_reg, Attn_reg, dl_dZ2_col_reg, Z2_bar_term_2_fl_reg);
         copy(Z2_bar_term_2_reg, Z2_bar_term_2_fl_reg);
@@ -170,8 +173,7 @@ void prefill_whole_loop_ker(
         // Store Output
         store(_Output + i * X_STRIDE, Z2_bar_term_1_reg, Z2_bar_term_1_reg.cols);
 
-        // Updated W2
-        sub(W2_col_reg, W2_col_reg, delta_W2_col_reg);
+        
     }
 
     store(_W1, W1_col_reg, W1_col_reg.cols);
