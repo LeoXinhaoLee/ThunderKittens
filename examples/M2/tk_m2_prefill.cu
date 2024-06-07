@@ -172,6 +172,7 @@ void prefill_whole_loop_ker(
         // Store Output
         store(_Output + i * X_STRIDE, Z2_bar_term_1_reg, Z2_bar_term_1_reg.cols); // 2KB - 132KB
 
+
     }
 
     store(_W1, W1_col_reg, W1_col_reg.cols);
@@ -301,7 +302,6 @@ void prefill_whole_loop_ker_fp16(
         // Store Output
         store(_Output + i * X_STRIDE, Z2_bar_term_1_reg, Z2_bar_term_1_reg.cols);
 
-        
     }
 
     store(_W1, W1_col_reg, W1_col_reg.cols);
@@ -341,6 +341,7 @@ prefill_whole_loop
     );
 }
 
+
 void
 prefill_whole_loop_fp16
 (
@@ -374,3 +375,4 @@ prefill_whole_loop_fp16
 
 
 }
+
