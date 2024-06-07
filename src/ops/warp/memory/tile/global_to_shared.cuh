@@ -46,6 +46,32 @@ __device__ static inline void load(ST &dst, const bf16 *src, const int row_strid
         *(float4*)(&dst[{row, col}]) = *(float4*)(&src[row*row_stride + col]);
     }
 }
+
+template<ducks::st::all ST>
+__device__ static inline void load(ST &dst, const half *src, const int row_stride) {
+    // each thread needs to do 1 call per width*height
+    // attempting to improve striping into dram
+    // each lane of the warp should store sequential into dram
+
+    int laneid = threadIdx.x % 32;
+
+    // we can handle this many rows each time we run a memcpy_async
+    int elem_per_memcpy = sizeof(float4)/sizeof(half);
+    int memcpy_per_row = dst.cols / elem_per_memcpy;
+    int total_calls = dst.height * dst.width;
+
+    #pragma unroll
+    for(int i = 0; i < total_calls; i++) {
+
+        int idx = i * 32 + laneid;
+        
+        int row = idx / memcpy_per_row;
+        int col = (idx*elem_per_memcpy) % dst.cols;
+
+        *(float4*)(&dst[{row, col}]) = *(float4*)(&src[row*row_stride + col]);
+    }
+}
+
 /**
  * @brief Stores bf16 data from a shared memory tile with a row layout into global memory.
  *
@@ -61,6 +87,28 @@ __device__ static inline void store(bf16 *dst, const ST &src, const int row_stri
 
     // we can handle this many rows each time we run a memcpy_async
     int elem_per_memcpy = sizeof(float4)/sizeof(bf16);
+    int memcpy_per_row = src.cols / elem_per_memcpy;
+    int total_calls = src.height * src.width;
+
+    #pragma unroll
+    for(int i = 0; i < total_calls; i++) {
+
+        int idx = i * 32 + laneid;
+        
+        int row = idx / memcpy_per_row;
+        int col = (idx*elem_per_memcpy) % src.cols;
+
+        *(float4*)(&dst[row*row_stride + col]) = *(float4*)(&src[{row, col}]);
+    }
+}
+
+template<ducks::st::all ST>
+__device__ static inline void store(half *dst, const ST &src, const int row_stride) {
+
+    int laneid = threadIdx.x % 32;
+
+    // we can handle this many rows each time we run a memcpy_async
+    int elem_per_memcpy = sizeof(float4)/sizeof(half);
     int memcpy_per_row = src.cols / elem_per_memcpy;
     int total_calls = src.height * src.width;
 
