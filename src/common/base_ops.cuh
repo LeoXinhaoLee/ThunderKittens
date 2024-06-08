@@ -178,7 +178,7 @@
  template<> __device__ inline float2 sum::op<float2>(const float2 &a, const float2 &b) { return float2{a.x+b.x, a.y+b.y}; }
  template<> __device__ inline bf16   sum::op<bf16>  (const bf16   &a, const bf16   &b) { return __hadd(a, b);             }
  template<> __device__ inline bf16_2 sum::op<bf16_2>(const bf16_2 &a, const bf16_2 &b) { return __hadd2(a, b);            }
- template<> __device__ inline half sum::op<half>(const half &a, const half &b) { return __hadd(a, b);            }
+ template<> __device__ inline half sum::op<half>(const half &a, const half &b) { return __hadd(a, b);            } // @geng
  template<> __device__ inline half_2 sum::op<half_2>(const half_2 &a, const half_2 &b) { return __hadd2(a, b);            }
  /**
   * @brief Subtraction operation.
@@ -196,7 +196,7 @@
  template<> __device__ inline float2 sub::op<float2>(const float2 &a, const float2 &b) { return float2{a.x-b.x, a.y-b.y}; }
  template<> __device__ inline bf16   sub::op<bf16>  (const bf16   &a, const bf16   &b) { return __hsub(a, b);             }
  template<> __device__ inline bf16_2 sub::op<bf16_2>(const bf16_2 &a, const bf16_2 &b) { return __hsub2(a, b);            }
- template<> __device__ inline half sub::op<half>(const half &a, const half &b) { return __hsub(a, b);            }
+ template<> __device__ inline half sub::op<half>(const half &a, const half &b) { return __hsub(a, b);            } // @geng
  template<> __device__ inline half_2 sub::op<half_2>(const half_2 &a, const half_2 &b) { return __hsub2(a, b);            }
  /**
   * @brief Multiplication operation.

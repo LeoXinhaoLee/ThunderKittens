@@ -47,6 +47,7 @@ __device__ static inline void load(ST &dst, const bf16 *src, const int row_strid
     }
 }
 
+// @geng
 template<ducks::st::all ST>
 __device__ static inline void load(ST &dst, const half *src, const int row_stride) {
     // each thread needs to do 1 call per width*height
@@ -102,6 +103,7 @@ __device__ static inline void store(bf16 *dst, const ST &src, const int row_stri
     }
 }
 
+// @geng
 template<ducks::st::all ST>
 __device__ static inline void store(half *dst, const ST &src, const int row_stride) {
 

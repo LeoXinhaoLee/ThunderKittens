@@ -155,6 +155,7 @@ struct st_subtile {
         col_offset = _col_offset;
     }
 
+    // @geng: Convert to the output data type
     __device__ inline       dtype& operator[](const int2 &rowcol)       {
         return *(dtype*)detail::shared_indexer<underlying_height, underlying_width, layout>::idx(
             (bf16*)data, rowcol.x+row_offset, rowcol.y+col_offset
