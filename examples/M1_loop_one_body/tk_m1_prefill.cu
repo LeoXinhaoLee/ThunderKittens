@@ -221,6 +221,72 @@ void prefill_whole_loop_ker(
     store(_W1, W1_reg, W1_reg.cols);
 }
 
+template <typename H, typename T>
+__global__
+void prefill_whole_loop_ker_fp16(
+        const int NC, const int CS, const int HF,
+        T* __W1,
+        const T* __XA, const T* __XB, const T* __XC,
+        T* __Output
+) {
+    H *_W1       = reinterpret_cast<H*>(__W1) + blockIdx.x * (HF*HF);
+    const H *_XA       = reinterpret_cast<const H*>(__XA) + blockIdx.x * (NC*CS*HF);
+    const H *_XB       = reinterpret_cast<const H*>(__XB) + blockIdx.x * (NC*CS*HF);
+    const H *_XC       = reinterpret_cast<const H*>(__XC) + blockIdx.x * (NC*CS*HF);
+    H *_Output = reinterpret_cast<H*>(__Output) + blockIdx.x * (NC*CS*HF);
+
+    rt_hf<4, 4, kittens::ducks::rt_layout::col> W1_reg;
+    rt_hf<1, 4> XA_reg;
+    rt_hf<1, 4> XB_reg;
+    rt_hf<1, 4> XC_reg;
+
+    rt_hf<1, 4> Z1_reg;
+
+    rt_hf<1, 4> Output_reg;
+    rt_hf<1, 4> Z1_bar_term_1_reg;
+    rt_hf<1, 4> Z1_bar_term_2_reg;
+    rt_hf<1, 1> Attn1_reg;
+    rt_hf<4, 4> W1_row_reg;
+
+    load(W1_reg, _W1, W1_reg.cols);
+
+    for (int i = 0; i < NC; i++) {
+
+        load(XB_reg, _XB + i * CS * HF, XB_reg.cols);
+        zero(Z1_reg);
+        mma_AB(Z1_reg, XB_reg, W1_reg, Z1_reg); // [K,f] r, [f,f] c -> [K,f] r
+
+        load(XA_reg, _XA + i * CS * HF, XA_reg.cols);
+        sub(Z1_reg, Z1_reg, XA_reg);
+
+        rt_hf<1, 4, ducks::rt_layout::col> &Z1_col_reg = swap_layout_inplace(Z1_reg);
+
+        load(XC_reg, _XC + i * CS * HF, XC_reg.cols);
+        zero(Attn1_reg);
+        mma_ABt(Attn1_reg, XC_reg, XB_reg, Attn1_reg);
+
+        make_causal(Attn1_reg, Attn1_reg, base_types::constants<half>::zero());
+
+        zero(Z1_bar_term_1_reg);
+        mma_AB(Z1_bar_term_1_reg, XC_reg, W1_reg, Z1_bar_term_1_reg); // [N,K] r, [K,M] c -> [N,M] r
+
+        zero(Z1_bar_term_2_reg);
+        mma_AB(Z1_bar_term_2_reg, Attn1_reg, Z1_col_reg, Z1_bar_term_2_reg);  // [K,K] r, [K,f] c -> [K,f] r
+
+        sub(Output_reg, Z1_bar_term_1_reg, Z1_bar_term_2_reg);
+        store(_Output + i * CS * HF, Output_reg, Output_reg.cols);
+        rt_hf<1, 4, kittens::ducks::rt_layout::col> &XB_col_reg = swap_layout_inplace(XB_reg);
+
+        zero(W1_row_reg);
+        mma_AtB(W1_row_reg, XB_col_reg, Z1_col_reg, W1_row_reg);
+
+        rt_hf<4, 4, kittens::ducks::rt_layout::col> &W1_col_reg = swap_layout_inplace(W1_row_reg);
+
+        sub(W1_reg, W1_reg, W1_col_reg);
+    }
+
+    store(_W1, W1_reg, W1_reg.cols);
+}
 
 void
 prefill_whole_loop
@@ -256,3 +322,34 @@ prefill_whole_loop
 
 }
 
+void
+prefill_whole_loop_fp16
+        (
+                torch::Tensor W1,
+                torch::Tensor XA,
+                torch::Tensor XB,
+                torch::Tensor XC,
+                torch::Tensor Output,
+                cudaStream_t stream
+        ) {
+    auto batch = XA.size(0);
+    auto head = XA.size(1);
+    auto NC = XA.size(2);
+    auto CS = XA.size(3);
+    auto HF = XA.size(4);
+
+    using H = __half;
+    using T = c10::Half;
+    const int workers = 1;
+
+    auto threads = workers * kittens::WARP_THREADS;
+
+    prefill_whole_loop_ker_fp16<H, T><<<batch * head, threads, 0, stream>>>(
+            NC, CS, HF,
+            W1.data_ptr<T>(),
+            XA.data_ptr<T>(), XB.data_ptr<T>(), XC.data_ptr<T>(),
+            Output.data_ptr<T>()
+    );
+
+
+}
