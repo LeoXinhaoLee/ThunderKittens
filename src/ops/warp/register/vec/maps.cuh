@@ -186,6 +186,12 @@ __device__ static inline void relu(T &dst, const T &src) {
     unary_op<base_ops::relu, T>(dst, src);
 }
 
+// Geng: Add sqrt
+template<ducks::rv::all T>
+__device__ static inline void sqrt(T &dst, const T &src) {
+    unary_op<base_ops::sqrt, T>(dst, src);
+}
+
 // ---- binary ops ----
 
 /**
@@ -266,5 +272,8 @@ template<ducks::rv::all T, typename U>
 __device__ static inline void div(T &dst, const T &lhs, const U &rhs) {
     bin_op<base_ops::div, T>(dst, lhs, rhs);
 }
+
+
+
 
 }

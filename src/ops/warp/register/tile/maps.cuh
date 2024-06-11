@@ -468,6 +468,12 @@ __device__ static inline void copy(T &dst, const U &src) {
     bin_map<base_ops::copy2, T>(dst, src);
 }
 
+// Geng: Add sqrt
+template<ducks::rt::all T>
+__device__ static inline void sqrt(T &dst, const T &src) {
+    unary_map<base_ops::sqrt, T>(dst, src);
+}
+
 /**
  * @brief Applies the max operation element-wise between two tiles or a tile and a scalar.
  *
