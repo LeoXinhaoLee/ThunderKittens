@@ -276,8 +276,8 @@ void prefill_whole_loop_LN_bias_ker(
     H *_W1       = reinterpret_cast<H*>(__W1) + blockIdx.x * (HF*HF);
     H *_b1       = reinterpret_cast<H*>(__b1) + blockIdx.x * HF;
 
-    const H *_ln_weight = reinterpret_cast<const H*>(__ln_weight) + (blockIdx.x % NH) * HF;
-    const H *_ln_bias   = reinterpret_cast<const H*>(__ln_bias) + (blockIdx.x % NH) * HF;
+    const H *_ln_weight = reinterpret_cast<const H*>(__ln_weight) + (blockIdx.x % NH) * (CS*HF);
+    const H *_ln_bias   = reinterpret_cast<const H*>(__ln_bias) + (blockIdx.x % NH) * (CS*HF);
 
     const H *_XA        = reinterpret_cast<const H*>(__XA) + blockIdx.x * (NC*CS*HF);
     const H *_XB        = reinterpret_cast<const H*>(__XB) + blockIdx.x * (NC*CS*HF);
