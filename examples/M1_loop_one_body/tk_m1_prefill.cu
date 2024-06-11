@@ -342,7 +342,7 @@ void prefill_whole_loop_LN_bias_ker(
         rt_bf<1, 4> Z1_hat;  // normalized Z1 with 0 mean and 1 std
         sub_row(Z1_hat, Z1_reg, Z1_mean_reg);
         div_row(Z1_hat, Z1_hat, Z1_std_reg);
-/*
+
         rt_bf<1, 4> LN_out_reg;  // affined by LN scale and bias
         mul(LN_out_reg, Z1_hat, ln_w_reg);  // [K,f] * [K,f]
         add(LN_out_reg, LN_out_reg, ln_b_reg);
@@ -357,7 +357,7 @@ void prefill_whole_loop_LN_bias_ker(
         rt_bf<1, 4>::col_vec dl_dZ1_vec_term;
         row_sum(dl_dZ1_vec_term, dl_dZ1_hat);
         sub_row(dl_dZ1, dl_dZ1, dl_dZ1_vec_term);
-
+/*
         rt_bf<1, 4> dl_dZ1_term_3;
         mul(dl_dZ1_term_3, dl_dZ1_hat, Z1_hat);
         row_sum(dl_dZ1_vec_term, dl_dZ1_term_3);
@@ -376,8 +376,9 @@ void prefill_whole_loop_LN_bias_ker(
         rt_bf<1, 4, ducks::rt_layout::col> &dl_dZ1_col = swap_layout_inplace(dl_dZ1);
 */
 
-        rt_bf<1, 4> dl_dZ1;
-        copy(dl_dZ1, Z1_hat);
+        // Test LN fwd
+//        rt_bf<1, 4> dl_dZ1;
+//        copy(dl_dZ1, dl_dZ1_hat);
         rt_bf<1, 4, ducks::rt_layout::col> &dl_dZ1_col = swap_layout_inplace(dl_dZ1);
 
         // 2nd forward
