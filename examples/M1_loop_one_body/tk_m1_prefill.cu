@@ -294,6 +294,11 @@ void prefill_whole_loop_LN_bias_ker(
     rt_bf<4, 4, kittens::ducks::rt_layout::col> W1_reg;
     load(W1_reg, _W1, W1_reg.cols);
 
+    rt_bf<1, 4> ln_w_reg;
+    rt_bf<1, 4> ln_b_reg;
+    load(ln_w_reg, _ln_weight, ln_w_reg.cols);
+    load(ln_b_reg, _ln_bias, ln_b_reg.cols);
+
     for (int i = 0; i < NC; i++) {
 
         if (i % SMEM_POOL == 0) {
@@ -310,17 +315,59 @@ void prefill_whole_loop_LN_bias_ker(
 
         rt_fl<1, 4> Z1_fl_reg;
         zero(Z1_fl_reg);
-        mma_AB(Z1_fl_reg, XB_reg, W1_reg, Z1_fl_reg); // [K,f] r, [f,f] c -> [K,f] r
+        mma_AB(Z1_fl_reg, XB_reg, W1_reg, Z1_fl_reg); // [K,f]r, [f,f]c -> [K,f]r
+        rt_bf<1, 4> Z1_reg;
+        copy(Z1_reg, Z1_fl_reg);
 
         rt_bf<1, 4> XA_reg;
         load(XA_reg, XA_smem[i % SMEM_POOL]);
+        sub(XA_reg, XA_reg, XB_reg);  // l2_tgt = XA - XB
 
-        rt_bf<1, 4> Z1_reg;
-        copy(Z1_reg, Z1_fl_reg);
-        sub(Z1_reg, Z1_reg, XA_reg);
+        // LN fwd + bwd
+        rt_bf<1, 4>::col_vec Z1_mean_reg;
+        row_sum(Z1_mean_reg, Z1_reg);  // [K,f]
+        div(Z1_mean_reg, Z1_mean_reg, __float2bfloat16(HF));
 
-        rt_bf<1, 4, ducks::rt_layout::col> &Z1_col_reg = swap_layout_inplace(Z1_reg);  // dl_dZ1
+        rt_bf<1, 4> Z1_square_reg;
+        mul(Z1_square_reg, Z1_reg, Z1_reg); // Z1 ** 2
 
+        rt_bf<1, 4>::col_vec Z1_std_reg;
+        row_sum(Z1_std_reg, Z1_square_reg);  // [K,f]
+        div(Z1_std_reg, Z1_std_reg, __float2bfloat16(HF));
+        add(Z1_std_reg, Z1_std_reg, __float2bfloat16(1e-6f));
+        // TODO: sqrt to get std
+
+        rt_bf<1, 4> Z1_hat;  // normalized Z1 with 0 mean and 1 std
+        sub_row(Z1_hat, Z1_reg, Z1_mean_reg);
+        div_row(Z1_hat, Z1_hat, Z1_std_reg);
+
+        rt_bf<1, 4> LN_out_reg;  // affined by LN scale and bias
+        mul(LN_out_reg, Z1_hat, ln_w_reg);  // [K,f] * [K,f]
+        add(LN_out_reg, LN_out_reg, ln_b_reg);
+
+        rt_bf<1, 4> dl_dZ1_hat;
+        sub(dl_dZ1_hat, LN_out_reg, XA_reg);
+        mul(dl_dZ1_hat, dl_dZ1_hat, ln_w_reg);
+
+        rt_bf<1, 4> dl_dZ1;
+        mul(dl_dZ1, dl_dZ1_hat, __float2bfloat16(HF));
+
+        rt_bf<1, 4>::col_vec dl_dZ1_vec_term;
+        row_sum(dl_dZ1_vec_term, dl_dZ1_hat);
+        sub_row(dl_dZ1, dl_dZ1, dl_dZ1_vec_term);
+
+        rt_bf<1, 4> dl_dZ1_term_3;
+        mul(dl_dZ1_term_3, dl_dZ1_hat, Z1_hat);
+        row_sum(dl_dZ1_vec_term, dl_dZ1_term_3);
+        mul_row(dl_dZ1_term_3, Z1_hat, dl_dZ1_vec_term);
+
+        sub(dl_dZ1, dl_dZ1, dl_dZ1_term_3);
+        div_row(dl_dZ1, dl_dZ1, Z1_std_reg);
+        div(dl_dZ1, dl_dZ1, __float2bfloat16(HF));
+
+        rt_bf<1, 4, ducks::rt_layout::col> &dl_dZ1_col = swap_layout_inplace(dl_dZ1);  // [K,f]
+
+        // 2nd forward
         rt_bf<1, 4> XC_reg;
         load(XC_reg, XC_smem[i % SMEM_POOL]);
 
@@ -340,17 +387,18 @@ void prefill_whole_loop_LN_bias_ker(
 
         rt_fl<1, 4> Z1_bar_term_2_fl_reg;
         zero(Z1_bar_term_2_fl_reg);
-        mma_AB(Z1_bar_term_2_fl_reg, Attn1_reg, Z1_col_reg, Z1_bar_term_2_fl_reg);  // [K,K] r, [K,f] c -> [K,f] r
+        mma_AB(Z1_bar_term_2_fl_reg, Attn1_reg, dl_dZ1_col, Z1_bar_term_2_fl_reg);  // [K,K] r, [K,f] c -> [K,f] r
         rt_bf<1, 4> Z1_bar_term_2_reg;
         copy(Z1_bar_term_2_reg, Z1_bar_term_2_fl_reg);
 
         sub(Z1_bar_term_1_reg, Z1_bar_term_1_reg, Z1_bar_term_2_reg);
+        add(Z1_bar_term_1_reg, XC_reg, Z1_bar_term_1_reg);
         store(_Output + i * CS * HF, Z1_bar_term_1_reg, Z1_bar_term_1_reg.cols);
 
         rt_bf<1, 4, kittens::ducks::rt_layout::col> &XB_col_reg = swap_layout_inplace(XB_reg);
         rt_fl<4, 4> delta_W1_fl_reg;
         zero(delta_W1_fl_reg);
-        mma_AtB(delta_W1_fl_reg, XB_col_reg, Z1_col_reg, delta_W1_fl_reg);
+        mma_AtB(delta_W1_fl_reg, XB_col_reg, dl_dZ1_col, delta_W1_fl_reg);
 
         rt_bf<4, 4> delta_W1_reg;
         copy(delta_W1_reg, delta_W1_fl_reg);
