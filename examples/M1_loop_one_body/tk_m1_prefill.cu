@@ -326,10 +326,15 @@ void prefill_whole_loop_LN_bias_ker(
         // LN fwd + bwd
         rt_bf<1, 4>::col_vec Z1_mean_reg;
         row_sum(Z1_mean_reg, Z1_reg);  // [K,f]
+//        rt_fl<1, 4>::col_vec Z1_mean_fl_reg;
+//        row_sum(Z1_mean_fl_reg, Z1_fl_reg);  // [K,f]
+//        copy(Z1_mean_reg, Z1_mean_fl_reg);
+//        sub_row(Z1_fl_reg, Z1_fl_reg, Z1_mean_fl_reg);
         div(Z1_mean_reg, Z1_mean_reg, __float2bfloat16(HF));
 
         rt_bf<1, 4> Z1_square_reg;
-        mul(Z1_square_reg, Z1_reg, Z1_reg); // Z1 ** 2
+        sub_row(Z1_square_reg, Z1_reg, Z1_mean_reg);
+        mul(Z1_square_reg, Z1_square_reg, Z1_square_reg); // (Z1 - mu) ** 2
 
         rt_bf<1, 4>::col_vec Z1_std_reg;
         row_sum(Z1_std_reg, Z1_square_reg);  // [K,f]
@@ -338,9 +343,10 @@ void prefill_whole_loop_LN_bias_ker(
         // TODO: sqrt to get std
 
         rt_bf<1, 4> Z1_hat;  // normalized Z1 with 0 mean and 1 std
+//        copy(Z1_hat, Z1_fl_reg);
         sub_row(Z1_hat, Z1_reg, Z1_mean_reg);
         div_row(Z1_hat, Z1_hat, Z1_std_reg);
-
+/*
         rt_bf<1, 4> LN_out_reg;  // affined by LN scale and bias
         mul(LN_out_reg, Z1_hat, ln_w_reg);  // [K,f] * [K,f]
         add(LN_out_reg, LN_out_reg, ln_b_reg);
@@ -366,6 +372,17 @@ void prefill_whole_loop_LN_bias_ker(
         div(dl_dZ1, dl_dZ1, __float2bfloat16(HF));
 
         rt_bf<1, 4, ducks::rt_layout::col> &dl_dZ1_col = swap_layout_inplace(dl_dZ1);  // [K,f]
+*/
+
+/* Test mem leak: no LN can match
+        rt_bf<1, 4> dl_dZ1;
+        copy(dl_dZ1, Z1_reg);
+        rt_bf<1, 4, ducks::rt_layout::col> &dl_dZ1_col = swap_layout_inplace(dl_dZ1);
+*/
+
+        rt_bf<1, 4> dl_dZ1;
+        copy(dl_dZ1, Z1_hat);
+        rt_bf<1, 4, ducks::rt_layout::col> &dl_dZ1_col = swap_layout_inplace(dl_dZ1);
 
         // 2nd forward
         rt_bf<1, 4> XC_reg;
