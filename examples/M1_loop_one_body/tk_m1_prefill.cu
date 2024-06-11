@@ -1,4 +1,5 @@
 #include <iostream>
+#include <string>
 #include <math.h>
 #include <assert.h>
 //#include <mma_AB.h>
@@ -14,6 +15,12 @@ using namespace nvcuda;
 // **** ASYNC INCLUDE *****
 #include <cuda/pipeline>
 #include <cooperative_groups.h>
+
+#define X_STRIDE 1024  // 16 * 64
+#define W_STRIDE 4096  // 64 * 64
+#define b_STRIDE 64    // 64
+#define SMEM_POOL 1
+#define SMEM_BLOCK 3 * SMEM_POOL * X_STRIDE * 2  // bytes
 
 using namespace kittens;
 
@@ -256,3 +263,137 @@ prefill_whole_loop
 
 }
 
+
+template <typename H, typename T>
+__global__
+void prefill_whole_loop_LN_bias_ker(
+        const int NH, const int NC, const int CS, const int HF,
+        T* __W1, T* __b1,
+        const T* __ln_weight, const T* __ln_bias,
+        const T* __XA, const T* __XB, const T* __XC,
+        T* __Output
+) {
+    H *_W1       = reinterpret_cast<H*>(__W1) + blockIdx.x * (HF*HF);
+    H *_b1       = reinterpret_cast<H*>(__b1) + blockIdx.x * HF;
+
+    const H *_ln_weight = reinterpret_cast<const H*>(__ln_weight) + (blockIdx.x % NH) * HF;
+    const H *_ln_bias   = reinterpret_cast<const H*>(__ln_bias) + (blockIdx.x % NH) * HF;
+
+    const H *_XA        = reinterpret_cast<const H*>(__XA) + blockIdx.x * (NC*CS*HF);
+    const H *_XB        = reinterpret_cast<const H*>(__XB) + blockIdx.x * (NC*CS*HF);
+    const H *_XC        = reinterpret_cast<const H*>(__XC) + blockIdx.x * (NC*CS*HF);
+    H *_Output = reinterpret_cast<H*>(__Output) + blockIdx.x * (NC*CS*HF);
+
+    extern __shared__ alignment_dummy __shm[]; // this is the CUDA shared memory
+    shared_allocator al((int*)&__shm[0]);
+
+    st_bf<1, 4, ducks::st_layout::swizzle> (&XA_smem)[SMEM_POOL] = al.allocate<st_bf<1, 4, ducks::st_layout::swizzle>, SMEM_POOL>();
+    st_bf<1, 4, ducks::st_layout::swizzle> (&XB_smem)[SMEM_POOL] = al.allocate<st_bf<1, 4, ducks::st_layout::swizzle>, SMEM_POOL>();
+    st_bf<1, 4, ducks::st_layout::swizzle> (&XC_smem)[SMEM_POOL] = al.allocate<st_bf<1, 4, ducks::st_layout::swizzle>, SMEM_POOL>();
+
+    rt_bf<4, 4, kittens::ducks::rt_layout::col> W1_reg;
+    load(W1_reg, _W1, W1_reg.cols);
+
+    for (int i = 0; i < NC; i++) {
+
+        if (i % SMEM_POOL == 0) {
+            for (int j = 0; j < SMEM_POOL; j++) {
+                load(XA_smem[j], _XA + (i + j) * X_STRIDE, 64);
+                load(XB_smem[j], _XB + (i + j) * X_STRIDE, 64);
+                load(XC_smem[j], _XC + (i + j) * X_STRIDE, 64);
+            }
+        }
+
+        // Forward
+        rt_bf<1, 4> XB_reg;
+        load(XB_reg, XB_smem[i % SMEM_POOL]);
+
+        rt_fl<1, 4> Z1_fl_reg;
+        zero(Z1_fl_reg);
+        mma_AB(Z1_fl_reg, XB_reg, W1_reg, Z1_fl_reg); // [K,f] r, [f,f] c -> [K,f] r
+
+        rt_bf<1, 4> XA_reg;
+        load(XA_reg, XA_smem[i % SMEM_POOL]);
+
+        rt_bf<1, 4> Z1_reg;
+        copy(Z1_reg, Z1_fl_reg);
+        sub(Z1_reg, Z1_reg, XA_reg);
+
+        rt_bf<1, 4, ducks::rt_layout::col> &Z1_col_reg = swap_layout_inplace(Z1_reg);  // dl_dZ1
+
+        rt_bf<1, 4> XC_reg;
+        load(XC_reg, XC_smem[i % SMEM_POOL]);
+
+        rt_fl<1, 1> Attn1_fl_reg;
+        zero(Attn1_fl_reg);
+        mma_ABt(Attn1_fl_reg, XC_reg, XB_reg, Attn1_fl_reg);
+
+        rt_bf<1, 1> Attn1_reg;
+        copy(Attn1_reg, Attn1_fl_reg);
+        make_causal(Attn1_reg, Attn1_reg, base_types::constants<bf16>::zero());
+
+        rt_fl<1, 4> Z1_bar_term_1_fl_reg;
+        zero(Z1_bar_term_1_fl_reg);
+        mma_AB(Z1_bar_term_1_fl_reg, XC_reg, W1_reg, Z1_bar_term_1_fl_reg); // [N,K] r, [K,M] c -> [N,M] r
+        rt_bf<1, 4> Z1_bar_term_1_reg;
+        copy(Z1_bar_term_1_reg, Z1_bar_term_1_fl_reg);
+
+        rt_fl<1, 4> Z1_bar_term_2_fl_reg;
+        zero(Z1_bar_term_2_fl_reg);
+        mma_AB(Z1_bar_term_2_fl_reg, Attn1_reg, Z1_col_reg, Z1_bar_term_2_fl_reg);  // [K,K] r, [K,f] c -> [K,f] r
+        rt_bf<1, 4> Z1_bar_term_2_reg;
+        copy(Z1_bar_term_2_reg, Z1_bar_term_2_fl_reg);
+
+        sub(Z1_bar_term_1_reg, Z1_bar_term_1_reg, Z1_bar_term_2_reg);
+        store(_Output + i * CS * HF, Z1_bar_term_1_reg, Z1_bar_term_1_reg.cols);
+
+        rt_bf<1, 4, kittens::ducks::rt_layout::col> &XB_col_reg = swap_layout_inplace(XB_reg);
+        rt_fl<4, 4> delta_W1_fl_reg;
+        zero(delta_W1_fl_reg);
+        mma_AtB(delta_W1_fl_reg, XB_col_reg, Z1_col_reg, delta_W1_fl_reg);
+
+        rt_bf<4, 4> delta_W1_reg;
+        copy(delta_W1_reg, delta_W1_fl_reg);
+        rt_bf<4, 4, kittens::ducks::rt_layout::col> &delta_W1_col_reg = swap_layout_inplace(delta_W1_reg);
+
+        sub(W1_reg, W1_reg, delta_W1_col_reg);
+    }
+
+    store(_W1, W1_reg, W1_reg.cols);
+}
+
+
+void
+prefill_whole_loop_LN_bias
+        (
+                torch::Tensor W1,
+                torch::Tensor b1,
+                torch::Tensor ln_weight,
+                torch::Tensor ln_bias,
+                torch::Tensor XA,
+                torch::Tensor XB,
+                torch::Tensor XC,
+                torch::Tensor Output,
+                cudaStream_t stream
+        ) {
+    auto batch = XA.size(0);
+    auto head = XA.size(1);
+    auto NC = XA.size(2);
+    auto CS = XA.size(3);
+    auto HF = XA.size(4);
+
+    using H = __nv_bfloat16;
+    using T = c10::BFloat16;
+    const int workers = 1;
+
+    auto threads = workers * kittens::WARP_THREADS;
+
+    prefill_whole_loop_LN_bias_ker<H, T><<<batch * head, threads, SMEM_BLOCK, stream>>>(
+            head, NC, CS, HF,
+            W1.data_ptr<T>(), b1.data_ptr<T>(),
+            ln_weight.data_ptr<T>(), ln_bias.data_ptr<T>(),
+            XA.data_ptr<T>(), XB.data_ptr<T>(), XC.data_ptr<T>(),
+            Output.data_ptr<T>()
+    );
+
+}
