@@ -474,6 +474,12 @@ __device__ static inline void sqrt(T &dst, const T &src) {
     unary_map<base_ops::sqrt, T>(dst, src);
 }
 
+// Geng: Add gelu
+template<ducks::rt::float_like T>
+__device__ static inline void gelu(T &dst, const T &src) {
+    unary_map<base_ops::gelu, T>(dst, src);
+}
+
 /**
  * @brief Applies the max operation element-wise between two tiles or a tile and a scalar.
  *

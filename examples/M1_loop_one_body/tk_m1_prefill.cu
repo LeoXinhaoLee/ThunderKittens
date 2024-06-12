@@ -329,6 +329,7 @@ void prefill_whole_loop_LN_bias_ker(
 
         rt_fl<1, 4> XA_fl_reg;
         copy(XA_fl_reg, XA_reg);
+        gelu(XA_fl_reg, XA_fl_reg);
         // LN fwd + bwd
         rt_fl<1, 4>::col_vec Z1_mean_reg;
         row_sum(Z1_mean_reg, Z1_fl_reg);  // [K,f]

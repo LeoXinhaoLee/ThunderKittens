@@ -142,10 +142,8 @@ template<> __device__ inline float  sqrt::op<float> (const float &x ) { return _
 template<> __device__ inline float2 sqrt::op<float2>(const float2 &x) { return float2{__fsqrt_rn(x.x), __fsqrt_rn(x.y)};         }
 template<> __device__ inline bf16   sqrt::op<bf16>  (const bf16 &x  ) { return hsqrt(x);    }
 template<> __device__ inline bf16_2 sqrt::op<bf16_2>(const bf16_2 &x) { return h2sqrt(x); }
- 
- struct gelu {
 
- }
+
 
  /**
   * @brief Copy operation.
@@ -313,6 +311,26 @@ template<> __device__ inline bf16_2 sqrt::op<bf16_2>(const bf16_2 &x) { return h
          return sum::op<T>(mul::op<T>(a, c), b);
      }
  };
+
+// Geng: Add gelu
+struct tanh {
+    template<typename T> static __device__ inline T op(const T &x) { return div(sub(exp(x), exp(-x)),sum(exp(x), exp(-x))); }
+ };
+ template<> __device__ inline float tanh::op<float> (const float &x) {return (__expf(x) -__expf(-x)) / (__expf(x)+ __expf(-x)); }
+ template<> __device__ inline float2 tanh::op<float2>(const float2 &x) { return float2{__fdiv_rn(__fsub_rn(__expf(x.x), __expf(-x.x)), __fadd_rn(__expf(x.x), __expf(-x.x))), __fdiv_rn(__fsub_rn(__expf(x.y), __expf(-x.y)), __fadd_rn(__expf(x.y), __expf(-x.y)))}; } 
+
+ struct cubed {
+    template<typename T> static __device__ inline T op(const T &x) { return mul(mul(x,x),x); }
+ };
+ template<> __device__ inline float cubed::op<float> (const float &x) { return x * x * x; }
+ template<> __device__ inline float2 cubed::op<float2>(const float2 &x) { return float2{x.x * x.x * x.x, x.y * x.y* x.y}; }
+
+ struct gelu {
+    template<typename T> static __device__ inline T op(const T &x) { return 0.5 * x * (1+tanh::op<T>(base_types::constants<T>::s2pi() * (x + 0.044715 * cubed::op<T>(x)))); }
+ };
+ template<> __device__ inline float gelu::op<float> (const float &x) { return 0.5f * x * (1 + tanh::op<float>(base_types::constants<float>::s2pi() * (x + 0.044715f * cubed::op<float>(x)))); }
+ template<> __device__ inline float2 gelu::op<float2>(const float2 &x) { return float2{0.5f * x.x * (1 + tanh::op<float>(base_types::constants<float>::s2pi() * (x.x + 0.044715f * cubed::op<float>(x.x)))), 0.5f * x.y * (1 + tanh::op<float>(base_types::constants<float>::s2pi() * (x.y + 0.044715f * cubed::op<float>(x.y))))}; }
+
  
  } // namespace base_ops
  

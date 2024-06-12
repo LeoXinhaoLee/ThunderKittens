@@ -192,6 +192,12 @@ __device__ static inline void sqrt(T &dst, const T &src) {
     unary_op<base_ops::sqrt, T>(dst, src);
 }
 
+template<ducks::rv::float_like T>
+__device__ static inline void gelu(T &dst, const T &src) {
+    unary_op<base_ops::gelu, T>(dst, src);
+}
+
+
 // ---- binary ops ----
 
 /**

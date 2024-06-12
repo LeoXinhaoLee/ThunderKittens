@@ -86,12 +86,16 @@ template<typename T> struct constants {
     // Geng: Add PI
     static __device__ inline constexpr T pi() {return T{3.1415926};}
 
+    static __device__ inline constexpr T s2pi() {return T{0.7978845608028654};}
 };
 template<> struct constants<float2> {
     static __device__ inline constexpr float2 zero()      { return float2{0.f, 0.f}; }
     static __device__ inline constexpr float2 one()       { return float2{1.f, 1.f}; }
     static __device__ inline constexpr float2 pos_infty() { return float2{constants<float>::pos_infty(), constants<float>::pos_infty()}; }
     static __device__ inline constexpr float2 neg_infty() { return float2{constants<float>::neg_infty(), constants<float>::neg_infty()}; }
+    // Geng: Add PI
+    static __device__ inline constexpr float2 pi()        { return float2{constants<float>::pi(), constants<float>::pi()}; }
+    static __device__ inline constexpr float2 s2pi()      { return float2{constants<float>::s2pi(), constants<float>::s2pi()}; }
 };
 template<> struct constants<bf16> {
     static __device__ inline constexpr bf16 zero()      { return std::bit_cast<__nv_bfloat16>(uint16_t(0x0000)); } // unfortunately __float2bf16_rn is not constexpr
