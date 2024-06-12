@@ -370,17 +370,6 @@ void prefill_whole_loop_LN_bias_ker(
 
         rt_bf<1, 4, ducks::rt_layout::col> &dl_dZ1_col = swap_layout_inplace(dl_dZ1);  // [K,f]
 
-/* Test mem leak: no LN can match
-        rt_bf<1, 4> dl_dZ1;
-        copy(dl_dZ1, Z1_reg);
-        rt_bf<1, 4, ducks::rt_layout::col> &dl_dZ1_col = swap_layout_inplace(dl_dZ1);
-*/
-
-        // Test LN fwd
-//        rt_bf<1, 4> dl_dZ1;
-//        copy(dl_dZ1, dl_dZ1_hat);
-//        rt_bf<1, 4, ducks::rt_layout::col> &dl_dZ1_col = swap_layout_inplace(dl_dZ1);
-
         // 2nd forward
         rt_bf<1, 4> XC_reg;
         load(XC_reg, XC_smem[i % SMEM_POOL]);
@@ -406,8 +395,7 @@ void prefill_whole_loop_LN_bias_ker(
         copy(Z1_bar_term_2_reg, Z1_bar_term_2_fl_reg);
 
         sub(Z1_bar_term_1_reg, Z1_bar_term_1_reg, Z1_bar_term_2_reg);
-        add(Z1_bar_term_1_reg, XC_reg, Z1_bar_term_1_reg);
-        store(_Output + i * CS * HF, Z1_bar_term_1_reg, Z1_bar_term_1_reg.cols);
+        store(_Output + i * CS * HF, Z1_bar_term_1_reg, Z1_bar_term_1_reg.cols);  // @xinhao: XC + LN(Z1_bar) can be done outside
 
         rt_bf<1, 4, kittens::ducks::rt_layout::col> &XB_col_reg = swap_layout_inplace(XB_reg);
         rt_fl<4, 4> delta_W1_fl_reg;
