@@ -298,6 +298,8 @@ void prefill_whole_loop_LN_bias_ker(
     rt_bf<1, 4> ln_b_reg;
     load(ln_w_reg, _ln_weight, ln_w_reg.cols);
     load(ln_b_reg, _ln_bias, ln_b_reg.cols);
+//    one(ln_w_reg);
+//    zero(ln_b_reg);
 
     for (int i = 0; i < NC; i++) {
 
