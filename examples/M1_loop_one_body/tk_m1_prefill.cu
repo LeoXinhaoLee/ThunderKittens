@@ -266,7 +266,7 @@ prefill_whole_loop
 
 template <typename H, typename T>
 __global__
-void prefill_whole_loop_LN_bias_ker(
+void prefill_whole_loop_LN_bias_bf16_ker(
         const int NH, const int NC, const int CS, const int HF,
         T* __W1, T* __b1,
         const T* __ln_weight, const T* __ln_bias,
