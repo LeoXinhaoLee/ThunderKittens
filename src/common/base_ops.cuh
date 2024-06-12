@@ -17,7 +17,7 @@
   * @brief A namespace for operations on basic data types.
   */
  namespace base_ops {
- 
+
  /* ----------  CONST OPS  ---------- */
  
  /**
@@ -143,6 +143,10 @@ template<> __device__ inline float2 sqrt::op<float2>(const float2 &x) { return f
 template<> __device__ inline bf16   sqrt::op<bf16>  (const bf16 &x  ) { return hsqrt(x);    }
 template<> __device__ inline bf16_2 sqrt::op<bf16_2>(const bf16_2 &x) { return h2sqrt(x); }
  
+ struct gelu {
+
+ }
+
  /**
   * @brief Copy operation.
   *
