@@ -31,21 +31,24 @@ extern void  prefill_whole_loop_ref(torch::Tensor W1,
 
 extern void  prefill_whole_loop_LN_bias(torch::Tensor W1, torch::Tensor b1,
                                         torch::Tensor ln_weight, torch::Tensor ln_bias,
-                                        torch::Tensor cumsum_matrix, torch::Tensor make_last_matrix,
-                                        torch::Tensor XA, torch::Tensor XB, torch::Tensor XC,
+                                        torch::Tensor cumsum_matrix, torch::Tensor make_last_b_matrix,
+                                        torch::Tensor make_last_coeff_1_matrix,
+                                        torch::Tensor XA, torch::Tensor XB, torch::Tensor XC, torch::Tensor Coeff,
                                         torch::Tensor Out,
                                         cudaStream_t stream);
 
 extern void  prefill_whole_loop_LN_bias_ref(torch::Tensor W1, torch::Tensor b1,
                                             torch::Tensor ln_weight, torch::Tensor ln_bias,
-                                            torch::Tensor cumsum_matrix, torch::Tensor make_last_matrix,
-                                            torch::Tensor XA, torch::Tensor XB, torch::Tensor XC,
+                                            torch::Tensor cumsum_matrix, torch::Tensor make_last_b_matrix,
+                                            torch::Tensor make_last_coeff_1_matrix,
+                                            torch::Tensor XA, torch::Tensor XB, torch::Tensor XC, torch::Tensor Coeff,
                                             torch::Tensor Out)
 {
     auto stream = at::cuda::getCurrentCUDAStream();
     prefill_whole_loop_LN_bias(W1, b1, ln_weight, ln_bias,
-                               cumsum_matrix, make_last_matrix,
-                               XA, XB, XC, Out, stream);
+                               cumsum_matrix, make_last_b_matrix,
+                               make_last_coeff_1_matrix,
+                               XA, XB, XC, Coeff, Out, stream);
 }
 
 
