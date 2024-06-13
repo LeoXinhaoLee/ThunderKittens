@@ -270,14 +270,18 @@ void prefill_whole_loop_LN_bias_ker(
         const int NH, const int NC, const int CS, const int HF,
         T* __W1, T* __b1,
         const T* __ln_weight, const T* __ln_bias,
+        const T* __cumsum_matrix, const T* __make_last_matrix,
         const T* __XA, const T* __XB, const T* __XC,
         T* __Output
 ) {
     H *_W1       = reinterpret_cast<H*>(__W1) + blockIdx.x * (HF*HF);
-    H *_b1       = reinterpret_cast<H*>(__b1) + blockIdx.x * HF;
+    H *_b1       = reinterpret_cast<H*>(__b1) + blockIdx.x * (CS*HF);
 
     const H *_ln_weight = reinterpret_cast<const H*>(__ln_weight) + (blockIdx.x % NH) * (CS*HF);
     const H *_ln_bias   = reinterpret_cast<const H*>(__ln_bias) + (blockIdx.x % NH) * (CS*HF);
+
+    const H *_cumsum_matrix      = reinterpret_cast<const H*>(__cumsum_matrix);
+    const H *_make_last_matrix   = reinterpret_cast<const H*>(__make_last_matrix);
 
     const H *_XA        = reinterpret_cast<const H*>(__XA) + blockIdx.x * (NC*CS*HF);
     const H *_XB        = reinterpret_cast<const H*>(__XB) + blockIdx.x * (NC*CS*HF);
@@ -294,16 +298,27 @@ void prefill_whole_loop_LN_bias_ker(
     rt_bf<4, 4, kittens::ducks::rt_layout::col> W1_reg;
     load(W1_reg, _W1, W1_reg.cols);
 
+    rt_bf<1, 4> b1_bf_reg;
+    load(b1_bf_reg, _b1, b1_bf_reg.cols);
+    rt_fl<1, 4> b1_reg;
+    copy(b1_reg, b1_bf_reg);
+
     rt_bf<1, 4> ln_w_reg_bf;
     rt_bf<1, 4> ln_b_reg_bf;
     load(ln_w_reg_bf, _ln_weight, ln_w_reg_bf.cols);
     load(ln_b_reg_bf, _ln_bias, ln_b_reg_bf.cols);
-//    one(ln_w_reg);
-//    zero(ln_b_reg);
+
     rt_fl<1, 4> ln_w_reg;
     rt_fl<1, 4> ln_b_reg;
+//    one(ln_w_reg);
+//    zero(ln_b_reg);
     copy(ln_w_reg, ln_w_reg_bf);
     copy(ln_b_reg, ln_b_reg_bf);
+
+    rt_bf<1, 1> cumsum_matrix_bf;
+    rt_bf<1, 1> make_last_matrix_bf;
+    load(cumsum_matrix_bf, _cumsum_matrix, cumsum_matrix_bf.cols);
+    load(make_last_matrix_bf, _make_last_matrix, make_last_matrix_bf.cols);
 
     for (int i = 0; i < NC; i++) {
 
@@ -320,8 +335,7 @@ void prefill_whole_loop_LN_bias_ker(
         load(XB_reg, XB_smem[i % SMEM_POOL]);
 
         rt_fl<1, 4> Z1_fl_reg;
-        zero(Z1_fl_reg);
-        mma_AB(Z1_fl_reg, XB_reg, W1_reg, Z1_fl_reg); // [K,f]r, [f,f]c -> [K,f]r
+        mma_AB(Z1_fl_reg, XB_reg, W1_reg, b1_reg); // [K,f]r <- [K,f]r @ [f,f]c + [K,f]r
 
         rt_bf<1, 4> XA_reg;
         load(XA_reg, XA_smem[i % SMEM_POOL]);
@@ -329,6 +343,7 @@ void prefill_whole_loop_LN_bias_ker(
 
         rt_fl<1, 4> XA_fl_reg;
         copy(XA_fl_reg, XA_reg);
+
         // LN fwd + bwd
         rt_fl<1, 4>::col_vec Z1_mean_reg;
         row_sum(Z1_mean_reg, Z1_fl_reg);  // [K,f]
@@ -370,12 +385,16 @@ void prefill_whole_loop_LN_bias_ker(
 
         sub(dl_dZ1, dl_dZ1, dl_dZ1_term_3);
         div_row(dl_dZ1, dl_dZ1, Z1_std_reg);
-        div(dl_dZ1, dl_dZ1,HF);
-
+        div(dl_dZ1, dl_dZ1, HF);
 
         rt_bf<1, 4> dl_dZ1_bf;
         copy(dl_dZ1_bf, dl_dZ1);
+
+        // Get b1_bar of chunk: b1_bar = b1 - cumsum(dl_dZ1, dim=0): [K,f]
         rt_bf<1, 4, ducks::rt_layout::col> &dl_dZ1_col = swap_layout_inplace(dl_dZ1_bf);  // [K,f]
+        mul(b1_reg, b1_reg, -1.f);
+        mma_AB(b1_reg, cumsum_matrix_bf, dl_dZ1_col, b1_reg);  // [K,f]r <- [K,K]r @ [K,f]c + [K,f]r
+        mul(b1_reg, b1_reg, -1.f);
 
         // 2nd forward
         rt_bf<1, 4> XC_reg;
@@ -390,8 +409,8 @@ void prefill_whole_loop_LN_bias_ker(
         make_causal(Attn1_reg, Attn1_reg, base_types::constants<bf16>::zero());
 
         rt_fl<1, 4> Z1_bar_term_1_fl_reg;
-        zero(Z1_bar_term_1_fl_reg);
-        mma_AB(Z1_bar_term_1_fl_reg, XC_reg, W1_reg, Z1_bar_term_1_fl_reg); // [N,K] r, [K,M] c -> [N,M] r
+        mma_AB(Z1_bar_term_1_fl_reg, XC_reg, W1_reg, b1_reg); // [K,f']r <- [K,f]r @ [f,f']c + [K,f']r
+
         rt_bf<1, 4> Z1_bar_term_1_reg;
         copy(Z1_bar_term_1_reg, Z1_bar_term_1_fl_reg);
 
@@ -414,9 +433,20 @@ void prefill_whole_loop_LN_bias_ker(
         rt_bf<4, 4, kittens::ducks::rt_layout::col> &delta_W1_col_reg = swap_layout_inplace(delta_W1_reg);
 
         sub(W1_reg, W1_reg, delta_W1_col_reg);
+
+        rt_bf<1, 4> b1_bar_bf_reg;
+        copy(b1_bar_bf_reg, b1_reg);
+        rt_bf<1, 4, kittens::ducks::rt_layout::col> &b1_bar_bf_col_reg = swap_layout_inplace(b1_bar_bf_reg);
+        zero(b1_reg);
+        mma_AB(b1_reg, make_last_matrix_bf, b1_bar_bf_col_reg, b1_reg);  // [K,f]r <- [K,K]r @ [K,f]c + 0[K,f]r
+
     }
 
     store(_W1, W1_reg, W1_reg.cols);
+    rt_bf<1, 4> b1_final_bf_reg;
+    copy(b1_final_bf_reg, b1_reg);
+    store(_b1, b1_final_bf_reg, b1_final_bf_reg.cols);
+
 }
 
 
@@ -427,6 +457,8 @@ prefill_whole_loop_LN_bias
                 torch::Tensor b1,
                 torch::Tensor ln_weight,
                 torch::Tensor ln_bias,
+                torch::Tensor cumsum_matrix,
+                torch::Tensor make_last_matrix,
                 torch::Tensor XA,
                 torch::Tensor XB,
                 torch::Tensor XC,
@@ -449,6 +481,7 @@ prefill_whole_loop_LN_bias
             head, NC, CS, HF,
             W1.data_ptr<T>(), b1.data_ptr<T>(),
             ln_weight.data_ptr<T>(), ln_bias.data_ptr<T>(),
+            cumsum_matrix.data_ptr<T>(), make_last_matrix.data_ptr<T>(),
             XA.data_ptr<T>(), XB.data_ptr<T>(), XC.data_ptr<T>(),
             Output.data_ptr<T>()
     );
