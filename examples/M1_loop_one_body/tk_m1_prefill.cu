@@ -363,15 +363,13 @@ void prefill_whole_loop_LN_bias_ker(
         rt_fl<1, 4>::col_vec Z1_std_reg;
         row_sum(Z1_std_reg, Z1_square_reg);  // [K,f]
         div(Z1_std_reg, Z1_std_reg, HF);
-//        add(Z1_std_reg, Z1_std_reg, 1e-6f);
-        add(Z1_std_reg, Z1_std_reg, 1e-4f);
-//        sqrt(Z1_std_reg, Z1_std_reg);
-        rsqrt(Z1_std_reg, Z1_std_reg);
+        add(Z1_std_reg, Z1_std_reg, 1e-6f);
+//        add(Z1_std_reg, Z1_std_reg, 1e-4f);
+        sqrt(Z1_std_reg, Z1_std_reg);
 
         rt_fl<1, 4> Z1_hat;  // normalized Z1 with 0 mean and 1 std
         sub_row(Z1_hat, Z1_fl_reg, Z1_mean_reg);
-//        div_row(Z1_hat, Z1_hat, Z1_std_reg);
-        mul_row(Z1_hat,  Z1_hat, Z1_std_reg);
+        div_row(Z1_hat, Z1_hat, Z1_std_reg);
 
         rt_fl<1, 4> LN_out_reg;  // affined by LN scale and bias
         mul(LN_out_reg, Z1_hat, ln_w_reg);  // [K,f] * [K,f]
@@ -394,9 +392,8 @@ void prefill_whole_loop_LN_bias_ker(
         mul_row(dl_dZ1_term_3, Z1_hat, dl_dZ1_vec_term);
 
         sub(dl_dZ1, dl_dZ1, dl_dZ1_term_3);
-//        div_row(dl_dZ1, dl_dZ1, Z1_std_reg);
-        mul_row(dl_dZ1, dl_dZ1, Z1_std_reg);
-        div(dl_dZ1, dl_dZ1, HF);
+        mul(Z1_std_reg, Z1_std_reg, HF);
+        div_row(dl_dZ1, dl_dZ1, Z1_std_reg);
 
         rt_bf<1, 4> dl_dZ1_bf;
         copy(dl_dZ1_bf, dl_dZ1);
@@ -579,3 +576,6 @@ prefill_ln_backward(
         dl_dZ1_hat.data_ptr<T>(), Z1_hat.data_ptr<T>(), Output.data_ptr<T>()
     );
 }
+
+
+
