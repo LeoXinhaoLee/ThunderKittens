@@ -308,7 +308,6 @@ void prefill_whole_loop_ker_fp16(
     store(_W2, W2_col_reg, W2_col_reg.cols);
 }
 
-
 void
 prefill_whole_loop
 (

@@ -192,6 +192,11 @@ __device__ static inline void sqrt(T &dst, const T &src) {
     unary_op<base_ops::sqrt, T>(dst, src);
 }
 
+template<ducks::rv::all T>
+__device__ static inline void rsqrt(T &dst, const T &src) {
+    unary_op<base_ops::rsqrt, T>(dst, src);
+}
+
 // ---- binary ops ----
 
 /**

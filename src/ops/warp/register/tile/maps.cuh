@@ -474,6 +474,11 @@ __device__ static inline void sqrt(T &dst, const T &src) {
     unary_map<base_ops::sqrt, T>(dst, src);
 }
 
+template<ducks::rt::all T>
+__device__ static inline void rsqrt(T &dst, const T &src) {
+    unary_map<base_ops::rsqrt, T>(dst, src);
+}
+
 /**
  * @brief Applies the max operation element-wise between two tiles or a tile and a scalar.
  *
