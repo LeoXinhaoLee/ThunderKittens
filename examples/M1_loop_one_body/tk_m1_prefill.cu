@@ -363,8 +363,9 @@ void prefill_whole_loop_LN_bias_ker(
         rt_fl<1, 4>::col_vec Z1_std_reg;
         row_sum(Z1_std_reg, Z1_square_reg);  // [K,f]
         div(Z1_std_reg, Z1_std_reg, HF);
-        add(Z1_std_reg, Z1_std_reg, 1e-6f);
-        sqrt(Z1_std_reg, Z1_std_reg);
+//        add(Z1_std_reg, Z1_std_reg, 1e-6f);
+        add(Z1_std_reg, Z1_std_reg, 1e-4f);
+//        sqrt(Z1_std_reg, Z1_std_reg);
 
         rt_fl<1, 4> Z1_hat;  // normalized Z1 with 0 mean and 1 std
         sub_row(Z1_hat, Z1_fl_reg, Z1_mean_reg);
