@@ -310,13 +310,13 @@ template<> __device__ inline bf16_2 sqrt::op<bf16_2>(const bf16_2 &x) { return h
      }
  };
 
-struct sqrt {
+struct rsqrt {
     template<typename T> static __device__ inline T op(const T &x) { return div(base_types::constants<T>::one(), sqrt(x)); }
 };
-template<> __device__ inline float  sqrt::op<float> (const float &x ) { return __frsqrt_rn(x);                                  }
-template<> __device__ inline float2 sqrt::op<float2>(const float2 &x) { return float2{__frsqrt_rn(x.x), __frsqrt_rn(x.y)};         }
-template<> __device__ inline bf16   sqrt::op<bf16>  (const bf16 &x  ) { return hrsqrt(x);    }
-template<> __device__ inline bf16_2 sqrt::op<bf16_2>(const bf16_2 &x) { return h2rsqrt(x); }
+template<> __device__ inline float  rsqrt::op<float> (const float &x ) { return __frsqrt_rn(x);                                  }
+template<> __device__ inline float2 rsqrt::op<float2>(const float2 &x) { return float2{__frsqrt_rn(x.x), __frsqrt_rn(x.y)};         }
+template<> __device__ inline bf16   rsqrt::op<bf16>  (const bf16 &x  ) { return hrsqrt(x);    }
+template<> __device__ inline bf16_2 rsqrt::op<bf16_2>(const bf16_2 &x) { return h2rsqrt(x); }
  
  } // namespace base_ops
  

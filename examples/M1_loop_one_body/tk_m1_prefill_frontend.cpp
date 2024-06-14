@@ -51,12 +51,12 @@ extern void  prefill_whole_loop_LN_bias_ref(torch::Tensor W1, torch::Tensor b1,
                                XA, XB, XC, Coeff, Out, stream);
 }
 
-extern void prefill_ln_backward(torch::Tensor dl_dZ1_hat, torch::Tensor Z1_hat, torch::Tensor Output, cudaStream_t stream);
+extern void prefill_ln_backward(torch::Tensor dl_dZ1_hat, torch::Tensor Z1_hat, torch::Tensor Z1_std, torch::Tensor Output, cudaStream_t stream);
 
-extern void prefill_ln_backward_ref(torch::Tensor dl_dZ1_hat, torch::Tensor Z1_hat, torch::Tensor Output)
+extern void prefill_ln_backward_ref(torch::Tensor dl_dZ1_hat, torch::Tensor Z1_hat, torch::Tensor Z1_std, torch::Tensor Output)
 {
     auto stream = at::cuda::getCurrentCUDAStream();
-    prefill_ln_backward(dl_dZ1_hat, Z1_hat, Output, stream);
+    prefill_ln_backward(dl_dZ1_hat, Z1_hat, Z1_std, Output, stream);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {

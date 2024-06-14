@@ -518,21 +518,25 @@ template <typename H, typename T>
 __global__
 void ln_backward(
     const int CS, const int HF,
-    const T* __dl_dZ1_hat, const T* __Z1_hat, 
+    const T* __dl_dZ1_hat, const T* __Z1_hat, const T* __std,
     T* __Output
 ) {
     const H *_dl_dZ1_hat = reinterpret_cast<const H*>(__dl_dZ1_hat) + blockIdx.x * (CS*HF);
     const H *_Z1_hat = reinterpret_cast<const H*>(__Z1_hat) + blockIdx.x * (CS*HF);
+    const H *_std = reinterpret_cast<const H*>(__std) + blockIdx.x * (CS);
     H *_Output = reinterpret_cast<H*>(__Output) + blockIdx.x * (CS*HF);
 
     rt_bf<1, 4> dl_dZ1_bf;
     rt_bf<1, 4> Z1_hat_bf;
+    rt_bf<1, 4>::col_vec Z1_std_reg_bf;
     load(dl_dZ1_bf, _dl_dZ1_hat, dl_dZ1_bf.cols);
     load(Z1_hat_bf, _Z1_hat, Z1_hat_bf.cols);
+    load(Z1_std_reg_bf, _std);
 
     rt_fl<1, 4> dl_dZ1_hat;
     copy(dl_dZ1_hat, dl_dZ1_bf);
     rt_fl<1, 4> dl_dZ1;
+    
     mul(dl_dZ1, dl_dZ1_hat, HF);  // HF * dl_dZ1_hat
 
     rt_fl<1, 4>::col_vec dl_dZ1_vec_term;
@@ -548,6 +552,9 @@ void ln_backward(
 
     sub(dl_dZ1, dl_dZ1, dl_dZ1_term_3);
     div(dl_dZ1, dl_dZ1, HF);
+    rt_fl<1, 4>::col_vec Z1_std_reg;
+    copy(Z1_std_reg, Z1_std_reg_bf);
+    div_row(dl_dZ1, dl_dZ1, Z1_std_reg);
 
     copy(dl_dZ1_bf, dl_dZ1);
     store(_Output, dl_dZ1_bf, dl_dZ1_bf.cols);
@@ -557,6 +564,7 @@ void
 prefill_ln_backward(
     torch::Tensor dl_dZ1_hat,
     torch::Tensor Z1_hat,
+    torch::Tensor Z1_std,
     torch::Tensor Output,
     cudaStream_t stream
 ) {
@@ -572,6 +580,7 @@ prefill_ln_backward(
 
     ln_backward<H, T><<<batch_mul_head, threads, 0, stream>>>(
         CS, HF,
-        dl_dZ1_hat.data_ptr<T>(), Z1_hat.data_ptr<T>(), Output.data_ptr<T>()
+        dl_dZ1_hat.data_ptr<T>(), Z1_hat.data_ptr<T>(), Z1_std.data_ptr<T>(),
+        Output.data_ptr<T>()
     );
 }
