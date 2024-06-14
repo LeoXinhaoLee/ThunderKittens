@@ -513,3 +513,66 @@ prefill_whole_loop_LN_bias
 //    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
 }
+
+
+template <typename H, typename T>
+__global__
+void ln_backward(
+    const int CS, const int HF,
+    const T* __dl_dZ1_hat, const T* __Z1_hat, 
+    T* __Output
+) {
+    const H *_dl_dZ1_hat = reinterpret_cast<const H*>(__dl_dZ1_hat) + blockIdx.x * (CS*HF);
+    const H *_Z1_hat = reinterpret_cast<const H*>(__Z1_hat) + blockIdx.x * (CS*HF);
+    H *_Output = reinterpret_cast<H*>(__Output) + blockIdx.x * (CS*HF);
+
+    rt_bf<1, 4> dl_dZ1_bf;
+    rt_bf<1, 4> Z1_hat_bf;
+    load(dl_dZ1_bf, _dl_dZ1_hat, dl_dZ1_bf.cols);
+    load(Z1_hat_bf, _Z1_hat, Z1_hat_bf.cols);
+
+    rt_fl<1, 4> dl_dZ1_hat;
+    copy(dl_dZ1_hat, dl_dZ1_bf);
+    rt_fl<1, 4> dl_dZ1;
+    mul(dl_dZ1, dl_dZ1_hat, HF);  // HF * dl_dZ1_hat
+
+    rt_fl<1, 4>::col_vec dl_dZ1_vec_term;
+    row_sum(dl_dZ1_vec_term, dl_dZ1_hat);
+    sub_row(dl_dZ1, dl_dZ1, dl_dZ1_vec_term);   // HF * dl_dZ1_hat - dl_dZ1_hat.sum(dim=-1, keepdim=True)
+
+    rt_fl<1, 4> dl_dZ1_term_3;
+    rt_fl<1, 4> Z1_hat;
+    copy(Z1_hat, Z1_hat_bf);
+    mul(dl_dZ1_term_3, dl_dZ1_hat, Z1_hat);
+    row_sum(dl_dZ1_vec_term, dl_dZ1_term_3);
+    mul_row(dl_dZ1_term_3, Z1_hat, dl_dZ1_vec_term);
+
+    sub(dl_dZ1, dl_dZ1, dl_dZ1_term_3);
+    div(dl_dZ1, dl_dZ1, HF);
+
+    copy(dl_dZ1_bf, dl_dZ1);
+    store(_Output, dl_dZ1_bf, dl_dZ1_bf.cols);
+}
+
+void 
+prefill_ln_backward(
+    torch::Tensor dl_dZ1_hat,
+    torch::Tensor Z1_hat,
+    torch::Tensor Output,
+    cudaStream_t stream
+) {
+    auto batch_mul_head = dl_dZ1_hat.size(0);
+    auto CS = dl_dZ1_hat.size(1);
+    auto HF = dl_dZ1_hat.size(2);
+
+    using H = __nv_bfloat16;
+    using T = c10::BFloat16;
+    const int workers = 1;
+
+    auto threads = workers * kittens::WARP_THREADS;
+
+    ln_backward<H, T><<<batch_mul_head, threads, 0, stream>>>(
+        CS, HF,
+        dl_dZ1_hat.data_ptr<T>(), Z1_hat.data_ptr<T>(), Output.data_ptr<T>()
+    );
+}
