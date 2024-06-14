@@ -364,6 +364,7 @@ void prefill_whole_loop_LN_bias_ker(
         row_sum(Z1_std_reg, Z1_square_reg);  // [K,f]
         div(Z1_std_reg, Z1_std_reg, HF);
         add(Z1_std_reg, Z1_std_reg, 1e-6f);
+//        add(Z1_std_reg, Z1_std_reg, 1e-4f);
         sqrt(Z1_std_reg, Z1_std_reg);
 
         rt_fl<1, 4> Z1_hat;  // normalized Z1 with 0 mean and 1 std
@@ -391,8 +392,8 @@ void prefill_whole_loop_LN_bias_ker(
         mul_row(dl_dZ1_term_3, Z1_hat, dl_dZ1_vec_term);
 
         sub(dl_dZ1, dl_dZ1, dl_dZ1_term_3);
+        mul(Z1_std_reg, Z1_std_reg, HF);
         div_row(dl_dZ1, dl_dZ1, Z1_std_reg);
-        div(dl_dZ1, dl_dZ1, HF);
 
         rt_bf<1, 4> dl_dZ1_bf;
         copy(dl_dZ1_bf, dl_dZ1);
@@ -584,3 +585,6 @@ prefill_ln_backward(
         Output.data_ptr<T>()
     );
 }
+
+
+

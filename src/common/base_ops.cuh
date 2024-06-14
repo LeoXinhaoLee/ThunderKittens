@@ -310,6 +310,7 @@ template<> __device__ inline bf16_2 sqrt::op<bf16_2>(const bf16_2 &x) { return h
      }
  };
 
+ // Geng
 struct rsqrt {
     template<typename T> static __device__ inline T op(const T &x) { return div(base_types::constants<T>::one(), sqrt(x)); }
 };
