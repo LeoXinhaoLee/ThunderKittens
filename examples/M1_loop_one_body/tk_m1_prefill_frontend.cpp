@@ -51,12 +51,26 @@ extern void  prefill_whole_loop_LN_bias_ref(torch::Tensor W1, torch::Tensor b1,
                                XA, XB, XC, Coeff, Out, stream);
 }
 
-extern void prefill_ln_backward(torch::Tensor dl_dZ1_hat, torch::Tensor Z1_hat, torch::Tensor Z1_std, torch::Tensor Output, cudaStream_t stream);
+extern void  prefill_whole_loop_LN_bias_fp16(torch::Tensor W1, torch::Tensor b1,
+                                             torch::Tensor ln_weight, torch::Tensor ln_bias,
+                                             torch::Tensor cumsum_matrix, torch::Tensor make_last_b_matrix,
+                                             torch::Tensor make_last_coeff_1_matrix,
+                                             torch::Tensor XA, torch::Tensor XB, torch::Tensor XC, torch::Tensor Coeff,
+                                             torch::Tensor Out,
+                                             cudaStream_t stream);
 
-extern void prefill_ln_backward_ref(torch::Tensor dl_dZ1_hat, torch::Tensor Z1_hat, torch::Tensor Z1_std, torch::Tensor Output)
+extern void  prefill_whole_loop_LN_bias_fp16_ref(torch::Tensor W1, torch::Tensor b1,
+                                                 torch::Tensor ln_weight, torch::Tensor ln_bias,
+                                                 torch::Tensor cumsum_matrix, torch::Tensor make_last_b_matrix,
+                                                 torch::Tensor make_last_coeff_1_matrix,
+                                                 torch::Tensor XA, torch::Tensor XB, torch::Tensor XC, torch::Tensor Coeff,
+                                                 torch::Tensor Out)
 {
     auto stream = at::cuda::getCurrentCUDAStream();
-    prefill_ln_backward(dl_dZ1_hat, Z1_hat, Z1_std, Output, stream);
+    prefill_whole_loop_LN_bias_fp16(W1, b1, ln_weight, ln_bias,
+                                    cumsum_matrix, make_last_b_matrix,
+                                    make_last_coeff_1_matrix,
+                                    XA, XB, XC, Coeff, Out, stream);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -64,5 +78,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("prefill_loop_body", &prefill_loop_body_ref);
     m.def("prefill_whole_loop", &prefill_whole_loop_ref);
     m.def("prefill_whole_loop_LN_bias", &prefill_whole_loop_LN_bias_ref);
-    m.def("prefill_ln_backward", &prefill_ln_backward_ref);
+    m.def("prefill_whole_loop_LN_bias_fp16", &prefill_whole_loop_LN_bias_fp16_ref);
 }
