@@ -35,6 +35,7 @@ void load_store_vector_ker(
     H *_Output = reinterpret_cast<H *>(__Output) + blockIdx.x * (CS * HF);
 
     rt_hf<1, 4>::row_vec XA_reg;
+//    rt_hf<4, 1>::col_vec XA_reg;
     load(XA_reg, _XA);
     store(_Output, XA_reg);
 
@@ -54,12 +55,54 @@ load_store_vector_fp16(torch::Tensor XA, torch::Tensor Output, cudaStream_t stre
 
     auto threads = workers * kittens::WARP_THREADS;
 
-    load_store_vector_ker<H, T><<<batch * head, threads, SMEM_BLOCK, stream>>>(
+    load_store_vector_ker<H, T><<<batch * head, threads, 0, stream>>>(
             CS, HF,
             XA.data_ptr<T>(), Output.data_ptr<T>()
     );
 }
 
+/*
+template <typename H, typename T>
+__global__
+void outer_product_vector_fp16_ker(
+        const int CS, const int HF,
+        const T* __X, const T* __Y, T* __Output
+) {
+    const H *_X = reinterpret_cast<const H *>(__X) + blockIdx.x * (CS * HF);
+    const H *_Y = reinterpret_cast<const H *>(__Y) + blockIdx.x * (HF * CS);
+    H *_Output = reinterpret_cast<H *>(__Output) + blockIdx.x * (HF * HF);
+
+    rt_hf<1, 4>::row_vec X_row_vec;
+    rt_hf<4, 1>::col_vec Y_col_vec;
+    load(X_row_vec, _X);
+    load(Y_col_vec, _Y);
+    rt_hf<4, 4> Output_reg;
+    mul(Output_reg, Y_col_vec, X_row_vec);
+    store(_Output, Output_reg);
+
+}
+
+void
+outer_product_vector_fp16(torch::Tensor X, torch::Tensor Y,
+                          torch::Tensor Output, cudaStream_t stream) {
+
+    auto batch = X.size(0);
+    auto head = X.size(1);
+    auto CS = X.size(2);  // 1
+    auto HF = X.size(3);
+
+    using H = __half;
+    using T = c10::Half;
+    const int workers = 1;
+
+    auto threads = workers * kittens::WARP_THREADS;
+
+    outer_product_vector_fp16_ker<H, T><<<batch * head, threads, 0, stream>>>(
+            CS, HF,
+            X.data_ptr<T>(), Y.data_ptr<T>(), Output.data_ptr<T>()
+    );
+}
+*/
 
 template <typename H, typename T>
 __global__
@@ -212,7 +255,6 @@ void decode_coeff_LN_bias_fp16_ker(
 
 }
 
-
 void
 decode_coeff_LN_bias_fp16(
         torch::Tensor W1, torch::Tensor b1,
@@ -234,6 +276,107 @@ decode_coeff_LN_bias_fp16(
     auto threads = workers * kittens::WARP_THREADS;
 
     decode_coeff_LN_bias_fp16_ker<H, T><<<batch * head, threads, 0, stream>>>(
+            head, CS, HF,
+            W1.data_ptr<T>(), b1.data_ptr<T>(),
+            W1_grad.data_ptr<T>(), b1_grad.data_ptr<T>(),
+            ln_weight.data_ptr<T>(), ln_bias.data_ptr<T>(),
+            XA.data_ptr<T>(), XB.data_ptr<T>(), XC.data_ptr<T>(),
+            token_idx.data_ptr<T>(), ilr_gated.data_ptr<T>(),
+            Output.data_ptr<T>()
+    );
+
+//    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
+
+}
+
+
+template <typename H, typename T>
+__global__
+void decode_coeff_LN_bias_simplified_fp16_ker(
+        const int NH, const int CS, const int HF,
+        const T* __W1, const T* __b1,
+        T* __W1_grad, T* __b1_grad,
+        const T* __ln_weight, const T* __ln_bias,
+        const T* __XA, const T* __XB, const T* __XC,
+        const T* __token_idx, const T* __ilr_gated,
+        T* __Output
+) {
+
+    H *_W1_grad       = reinterpret_cast<H*>(__W1_grad) + blockIdx.x * (HF*HF);
+    H *_b1_grad       = reinterpret_cast<H*>(__b1_grad) + blockIdx.x * HF;
+    H *_Output        = reinterpret_cast<H*>(__Output) + blockIdx.x * HF;
+
+    const H *_W1             = reinterpret_cast<const H*>(__W1) + blockIdx.x * (HF*HF);
+    const H *_b1             = reinterpret_cast<const H*>(__b1) + blockIdx.x * HF;                // row vec
+    const H *_ln_weight      = reinterpret_cast<const H*>(__ln_weight) + (blockIdx.x % NH) * HF;  // row vec
+    const H *_ln_bias        = reinterpret_cast<const H*>(__ln_bias) + (blockIdx.x % NH) * HF;    // row vec
+    const H *_XA             = reinterpret_cast<const H*>(__XA) + blockIdx.x * HF;                // row vec
+    const H *_XB             = reinterpret_cast<const H*>(__XB) + blockIdx.x * HF;                // row vec
+    const H *_XC             = reinterpret_cast<const H*>(__XC) + blockIdx.x * HF;                // row vec
+    const H *_token_idx      = reinterpret_cast<const H*>(__token_idx);
+    const H *_ilr_gated      = reinterpret_cast<const H*>(__ilr_gated) + blockIdx.x * HF;
+
+    rt_hf<4, 4, kittens::ducks::rt_layout::col> W1_reg;
+    load(W1_reg, _W1, W1_reg.cols);
+
+    rt_hf<1, 4>::row_vec b1_row_vec;
+    load(b1_row_vec, _b1);
+
+    rt_hf<1, 4>::row_vec ln_w_row_vec;
+    rt_hf<1, 4>::row_vec ln_b_row_vec;
+    load(ln_w_row_vec, _ln_weight);
+    load(ln_b_row_vec, _ln_bias);
+
+    rt_hf<1, 4>::row_vec XB_row_vec;
+    load(XB_row_vec, _XB);
+    rt_hf<1, 4>::row_vec XC_row_vec;
+    load(XC_row_vec, _XC);
+    rt_hf<1, 4>::row_vec XA_row_vec;
+    load(XA_row_vec, _XA);
+
+    rt_hf<1, 4>::row_vec ilr_gated_row_vec;
+    load(ilr_gated_row_vec, _ilr_gated);
+
+    // delta_b1 = ilr_mul_dl_dZ1
+    // b1_grad = b1_grad + delta_b1
+    rt_hf<1, 4>::row_vec b1_grad_row_vec;
+    load(b1_grad_row_vec, _b1_grad);
+    store(_b1_grad, b1_grad_row_vec);
+
+    // W1_grad = W1_grad + delta_W1
+    rt_hf<4, 4> W1_grad_reg;
+    load(W1_grad_reg, _W1_grad, W1_grad_reg.cols);
+    store(_W1_grad, W1_grad_reg, W1_grad_reg.cols);
+
+    // W1_bar = W1 - token_idx * W1_grad
+    rt_hf<1, 4>::row_vec token_idx_row_vec;
+    load(token_idx_row_vec, _token_idx);
+
+    store(_Output, XC_row_vec);
+
+}
+
+void
+decode_coeff_LN_bias_simplified_fp16(
+        torch::Tensor W1, torch::Tensor b1,
+        torch::Tensor W1_grad, torch::Tensor b1_grad,
+        torch::Tensor ln_weight, torch::Tensor ln_bias,
+        torch::Tensor XA, torch::Tensor XB, torch::Tensor XC,
+        torch::Tensor token_idx, torch::Tensor ilr_gated,
+        torch::Tensor Output, cudaStream_t stream
+) {
+    auto batch = XB.size(0);
+    auto head = XC.size(1);
+    auto CS = XB.size(2);  // CS=16 due to duplication
+    auto HF = XB.size(3);
+
+    using H = __half;
+    using T = c10::Half;
+    const int workers = 1;
+
+    auto threads = workers * kittens::WARP_THREADS;
+
+    decode_coeff_LN_bias_simplified_fp16_ker<H, T><<<batch * head, threads, 0, stream>>>(
             head, CS, HF,
             W1.data_ptr<T>(), b1.data_ptr<T>(),
             W1_grad.data_ptr<T>(), b1_grad.data_ptr<T>(),
