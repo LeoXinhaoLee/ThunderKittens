@@ -82,18 +82,27 @@ template<typename T> struct constants {
      * @return Constexpr negative infinity with type T
      */
     static __device__ inline constexpr T neg_infty() { return T{-INFINITY}; }
+
+    // Geng: Add PI
+    static __device__ inline constexpr T pi() {return T{3.1415926};}
+
+    static __device__ inline constexpr T s2pi() {return T{0.7978845608028654};}
 };
 template<> struct constants<float2> {
     static __device__ inline constexpr float2 zero()      { return float2{0.f, 0.f}; }
     static __device__ inline constexpr float2 one()       { return float2{1.f, 1.f}; }
     static __device__ inline constexpr float2 pos_infty() { return float2{constants<float>::pos_infty(), constants<float>::pos_infty()}; }
     static __device__ inline constexpr float2 neg_infty() { return float2{constants<float>::neg_infty(), constants<float>::neg_infty()}; }
+    // Geng: Add PI
+    static __device__ inline constexpr float2 pi()        { return float2{constants<float>::pi(), constants<float>::pi()}; }
+    static __device__ inline constexpr float2 s2pi()      { return float2{constants<float>::s2pi(), constants<float>::s2pi()}; }
 };
 template<> struct constants<bf16> {
     static __device__ inline constexpr bf16 zero()      { return std::bit_cast<__nv_bfloat16>(uint16_t(0x0000)); } // unfortunately __float2bf16_rn is not constexpr
     static __device__ inline constexpr bf16 one()       { return std::bit_cast<__nv_bfloat16>(uint16_t(0x3F80)); }
     static __device__ inline constexpr bf16 pos_infty() { return std::bit_cast<__nv_bfloat16>(uint16_t(0x7F80)); }
     static __device__ inline constexpr bf16 neg_infty() { return std::bit_cast<__nv_bfloat16>(uint16_t(0xFF80)); }
+    static __device__ inline constexpr bf16 pi()        { return std::bit_cast<__nv_bfloat16>(uint16_t(0x4049)); }
 };
 template<> struct constants<bf16_2> {
     static __device__ inline constexpr bf16_2 zero()      { return bf16_2{constants<bf16>::zero(),      constants<bf16>::zero()};      }
@@ -106,6 +115,7 @@ template<> struct constants<half> {
     static __device__ inline constexpr half one()       { return std::bit_cast<__half>(uint16_t(0x3C00)); }
     static __device__ inline constexpr half pos_infty() { return std::bit_cast<__half>(uint16_t(0x7C00)); }
     static __device__ inline constexpr half neg_infty() { return std::bit_cast<__half>(uint16_t(0xFC00)); }
+    static __device__ inline constexpr half pi() { return std::bit_cast<__half>(uint16_t(0x4248)); }
 };
 template<> struct constants<half_2> {
     static __device__ inline constexpr half_2 zero()      { return half_2{constants<half>::zero(),      constants<half>::zero()};      }

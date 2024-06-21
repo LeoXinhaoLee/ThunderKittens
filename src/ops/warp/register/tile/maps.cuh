@@ -474,6 +474,11 @@ __device__ static inline void sqrt(T &dst, const T &src) {
     unary_map<base_ops::sqrt, T>(dst, src);
 }
 
+// Geng: Add gelu
+template<ducks::rt::float_like T>
+__device__ static inline void gelu(T &dst, const T &src) {
+    unary_map<base_ops::gelu, T>(dst, src);
+
 template<ducks::rt::all T>
 __device__ static inline void rsqrt(T &dst, const T &src) {
     unary_map<base_ops::rsqrt, T>(dst, src);

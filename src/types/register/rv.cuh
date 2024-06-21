@@ -77,6 +77,9 @@ concept all = requires {
     typename T::identifier; // Checks if T::identifier exists
 } && std::is_same_v<typename T::identifier, identifier>; // Checks if T::identifier is ducks::rv::identifier.
 
+template<typename T>
+concept float_like = all<T> && (std::is_same_v<typename T::dtype, float> || std::is_same_v<typename T::dtype, float2> );
+
 } // namespace rv
 } // namespace ducks
 

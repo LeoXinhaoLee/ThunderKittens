@@ -17,7 +17,7 @@
   * @brief A namespace for operations on basic data types.
   */
  namespace base_ops {
- 
+
  /* ----------  CONST OPS  ---------- */
  
  /**
@@ -145,6 +145,7 @@ template<> __device__ inline bf16_2 sqrt::op<bf16_2>(const bf16_2 &x) { return h
 // @xinhao: add half and half_2
 template<> __device__ inline half   sqrt::op<half>  (const half &x  ) { return hsqrt(x);    }
 template<> __device__ inline half_2 sqrt::op<half_2>(const half_2 &x) { return h2sqrt(x); }
+
 
  /**
   * @brief Copy operation.
@@ -319,6 +320,26 @@ template<> __device__ inline half_2 sqrt::op<half_2>(const half_2 &x) { return h
      }
  };
 
+// Geng: Add gelu
+struct tanh {
+    template<typename T> static __device__ inline T op(const T &x) { return div(sub(exp(x), exp(-x)),sum(exp(x), exp(-x))); }
+ };
+ template<> __device__ inline float tanh::op<float> (const float &x) {return (__expf(x) -__expf(-x)) / (__expf(x)+ __expf(-x)); }
+ template<> __device__ inline float2 tanh::op<float2>(const float2 &x) { return float2{__fdiv_rn(__fsub_rn(__expf(x.x), __expf(-x.x)), __fadd_rn(__expf(x.x), __expf(-x.x))), __fdiv_rn(__fsub_rn(__expf(x.y), __expf(-x.y)), __fadd_rn(__expf(x.y), __expf(-x.y)))}; } 
+
+ struct cubed {
+    template<typename T> static __device__ inline T op(const T &x) { return mul(mul(x,x),x); }
+ };
+ template<> __device__ inline float cubed::op<float> (const float &x) { return x * x * x; }
+ template<> __device__ inline float2 cubed::op<float2>(const float2 &x) { return float2{x.x * x.x * x.x, x.y * x.y* x.y}; }
+
+ struct gelu {
+    template<typename T> static __device__ inline T op(const T &x) { return 0.5 * x * (1+tanh::op<T>(base_types::constants<T>::s2pi() * (x + 0.044715 * cubed::op<T>(x)))); }
+ };
+ template<> __device__ inline float gelu::op<float> (const float &x) { return 0.5f * x * (1 + tanh::op<float>(base_types::constants<float>::s2pi() * (x + 0.044715f * cubed::op<float>(x)))); }
+ template<> __device__ inline float2 gelu::op<float2>(const float2 &x) { return float2{0.5f * x.x * (1 + tanh::op<float>(base_types::constants<float>::s2pi() * (x.x + 0.044715f * cubed::op<float>(x.x)))), 0.5f * x.y * (1 + tanh::op<float>(base_types::constants<float>::s2pi() * (x.y + 0.044715f * cubed::op<float>(x.y))))}; }
+
+
  // Geng
 struct rsqrt {
     template<typename T> static __device__ inline T op(const T &x) { return div(base_types::constants<T>::one(), sqrt(x)); }
@@ -330,6 +351,7 @@ template<> __device__ inline bf16_2 rsqrt::op<bf16_2>(const bf16_2 &x) { return 
 // @xinhao: add half and half_2
 template<> __device__ inline half   rsqrt::op<half>  (const half &x  ) { return hrsqrt(x);    }
 template<> __device__ inline half_2 rsqrt::op<half_2>(const half_2 &x) { return h2rsqrt(x); }
+
  
  } // namespace base_ops
  
