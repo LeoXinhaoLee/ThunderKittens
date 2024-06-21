@@ -179,6 +179,39 @@ void prefill_whole_loop_ker(
     store(_W2, W2_col_reg, W2_col_reg.cols);
 }
 
+void
+prefill_whole_loop
+        (
+                torch::Tensor W1, torch::Tensor W2,
+                torch::Tensor XA, torch::Tensor XB, torch::Tensor XC,
+                torch::Tensor Output,
+                cudaStream_t stream
+        ) {
+    auto batch = XA.size(0);
+    auto head = XA.size(1);
+    auto NC = XA.size(2);
+    auto CS = XA.size(3);
+    auto HF = XA.size(4);
+    auto HF_prime = W1.size(3);  // [BS,NH,HF,HF_prime]
+
+//    std::cout << "HF: " << HF << std::endl;
+//    std::cout << "HF_prime: " << HF_prime << std::endl;
+
+    using H = __nv_bfloat16;
+    using T = c10::BFloat16;
+    const int workers = 1;
+
+    auto threads = workers * kittens::WARP_THREADS;
+
+    prefill_whole_loop_ker<H, T><<<batch * head, threads, SMEM_BLOCK, stream>>>(
+            NC,
+            W1.data_ptr<T>(), W2.data_ptr<T>(),
+            XA.data_ptr<T>(), XB.data_ptr<T>(), XC.data_ptr<T>(),
+            Output.data_ptr<T>()
+    );
+}
+
+
 template <typename H, typename T>
 __global__
 void prefill_whole_loop_ker_fp16(
@@ -310,39 +343,6 @@ void prefill_whole_loop_ker_fp16(
 
 
 void
-prefill_whole_loop
-(
-    torch::Tensor W1, torch::Tensor W2,
-    torch::Tensor XA, torch::Tensor XB, torch::Tensor XC,
-    torch::Tensor Output,
-    cudaStream_t stream
-) {
-    auto batch = XA.size(0);
-    auto head = XA.size(1);
-    auto NC = XA.size(2);
-    auto CS = XA.size(3);
-    auto HF = XA.size(4);
-    auto HF_prime = W1.size(3);  // [BS,NH,HF,HF_prime]
-
-//    std::cout << "HF: " << HF << std::endl;
-//    std::cout << "HF_prime: " << HF_prime << std::endl;
-
-    using H = __nv_bfloat16;
-    using T = c10::BFloat16;
-    const int workers = 1;
-
-    auto threads = workers * kittens::WARP_THREADS;
-
-    prefill_whole_loop_ker<H, T><<<batch * head, threads, SMEM_BLOCK, stream>>>(
-            NC,
-            W1.data_ptr<T>(), W2.data_ptr<T>(),
-            XA.data_ptr<T>(), XB.data_ptr<T>(), XC.data_ptr<T>(),
-            Output.data_ptr<T>()
-    );
-}
-
-
-void
 prefill_whole_loop_fp16
 (
     torch::Tensor W1, torch::Tensor W2,
@@ -356,9 +356,6 @@ prefill_whole_loop_fp16
     auto CS = XA.size(3);
     auto HF = XA.size(4);
     auto HF_prime = W1.size(3);  // [BS,NH,HF,HF_prime]
-
-//    std::cout << "HF: " << HF << std::endl;
-//    std::cout << "HF_prime: " << HF_prime << std::endl;
 
     using H = __half;
     using T = c10::Half;
