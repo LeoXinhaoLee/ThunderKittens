@@ -322,23 +322,66 @@ template<> __device__ inline half_2 sqrt::op<half_2>(const half_2 &x) { return h
 
 // Geng: Add gelu
 struct tanh {
-    template<typename T> static __device__ inline T op(const T &x) { return div(sub(exp(x), exp(-x)),sum(exp(x), exp(-x))); }
+    template<typename T> static __device__ inline T op(const T &x) { return tanf(x); }
  };
- template<> __device__ inline float tanh::op<float> (const float &x) {return (__expf(x) -__expf(-x)) / (__expf(x)+ __expf(-x)); }
- template<> __device__ inline float2 tanh::op<float2>(const float2 &x) { return float2{__fdiv_rn(__fsub_rn(__expf(x.x), __expf(-x.x)), __fadd_rn(__expf(x.x), __expf(-x.x))), __fdiv_rn(__fsub_rn(__expf(x.y), __expf(-x.y)), __fadd_rn(__expf(x.y), __expf(-x.y)))}; } 
+ template<> __device__ inline float tanh::op<float> (const float &x) {return tanf(x); }
+ template<> __device__ inline float2 tanh::op<float2>(const float2 &x) { return float2{tanf(x.x), tanf(x.y)}; }
+ template<> __device__ inline half tanh::op<half> (const half &x) {return __float2half(tanf(__half2float(x))); }
 
  struct cubed {
     template<typename T> static __device__ inline T op(const T &x) { return mul(mul(x,x),x); }
  };
  template<> __device__ inline float cubed::op<float> (const float &x) { return x * x * x; }
  template<> __device__ inline float2 cubed::op<float2>(const float2 &x) { return float2{x.x * x.x * x.x, x.y * x.y* x.y}; }
+ template<> __device__ inline half cubed::op<half> (const half &x) { return __hmul(x, __hmul(x, x)); }
 
  struct gelu {
-    template<typename T> static __device__ inline T op(const T &x) { return 0.5 * x * (1+tanh::op<T>(base_types::constants<T>::s2pi() * (x + 0.044715 * cubed::op<T>(x)))); }
+    template<typename T> static __device__ inline T op(const T &x) { return x; }
  };
  template<> __device__ inline float gelu::op<float> (const float &x) { return 0.5f * x * (1 + tanh::op<float>(base_types::constants<float>::s2pi() * (x + 0.044715f * cubed::op<float>(x)))); }
  template<> __device__ inline float2 gelu::op<float2>(const float2 &x) { return float2{0.5f * x.x * (1 + tanh::op<float>(base_types::constants<float>::s2pi() * (x.x + 0.044715f * cubed::op<float>(x.x)))), 0.5f * x.y * (1 + tanh::op<float>(base_types::constants<float>::s2pi() * (x.y + 0.044715f * cubed::op<float>(x.y))))}; }
+ template<> __device__ inline half gelu::op<half> (const half &x) {
+//     return 0.5 * x * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))
+    return __hmul(
+            __hmul(__float2half(0.5), x),
+            __hadd(__float2half(1.0),
+                   tanh::op<half>(__hmul(__float2half(0.79788456f),
+                                         __hadd(x, __hmul(__float2half(0.044715f), cubed::op<half>(x)))
+                                         )
+                                  )
+                   )
+            );
+ }
 
+ // @xinhao: add diff_gelu
+ struct diff_gelu {
+     template<typename T> static __device__ inline T op(const T &x){
+        return x;
+//         tanh_out = tanh(0.79788456 * x * (1 + 0.044715 * x * x))
+//         ff = 0.5 * x * ((1 - tanh_out * tanh_out) * (0.79788456 + 0.1070322243 * x * x)) + 0.5 * (1 + tanh_out)
+//         return ff
+     }
+ };
+ template<> __device__ inline float diff_gelu::op<float> (const float &x) {
+     float tanh_out = tanh::op<float>(0.79788456f * x * (1.0f + 0.044715f * x * x));
+     float ff = 0.5 * x * ((1.0 - tanh_out * tanh_out) * (0.79788456f + 0.1070322243f * x * x)) + 0.5 * (1.0 + tanh_out);
+     return ff;
+ }
+ // @xinhao: chatgpt
+ template<> __device__ inline half diff_gelu::op<half> (const half &x) {
+     half tanh_input = __hmul(__float2half(0.79788456f), __hmul(x, __hadd(__float2half(1.0f), __hmul(__float2half(0.044715f), __hmul(x, x)))));
+     half tanh_out = tanh::op<half>(tanh_input);
+     half ff_1 = __hmul(__float2half(0.5f),
+                        __hmul(x,
+                               __hmul(__hsub(__float2half(1.0f), __hmul(tanh_out, tanh_out)), __hadd(__float2half(0.79788456f),
+                                                                                                     __hmul(__float2half(0.1070322243f), __hmul(x, x)))
+                                      )
+                               )
+                        );
+     half ff_2 = __hmul(__float2half(0.5f), __hadd(__float2half(1.0f), tanh_out));
+     half ff = __hadd(ff_1, ff_2);
+     return ff;
+ }
 
  // Geng
 struct rsqrt {
