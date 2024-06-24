@@ -735,3 +735,252 @@ prefill_whole_loop_LN_bias_fp16
 //    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
 }
+
+
+template <typename H, typename T>
+__global__
+void prefill_whole_loop_LN_bias_res_PLN_fp16_ker(
+        const int NH, const int NC, const int CS, const int HF,
+        T* __W1, T* __b1,
+        const T* __ln_weight, const T* __ln_bias,
+        const T* __cumsum_matrix, const T* __make_last_b_matrix, const T* __make_last_coeff_1_matrix,
+        const T* __XA, const T* __XB, const T* __XC, const T* __Coeff,
+        T* __Output
+) {
+    H *_W1       = reinterpret_cast<H*>(__W1) + blockIdx.x * (HF*HF);
+    H *_b1       = reinterpret_cast<H*>(__b1) + blockIdx.x * (CS*HF);
+
+    const H *_ln_weight = reinterpret_cast<const H*>(__ln_weight) + (blockIdx.x % NH) * (CS*HF);
+    const H *_ln_bias   = reinterpret_cast<const H*>(__ln_bias) + (blockIdx.x % NH) * (CS*HF);
+
+    const H *_cumsum_matrix              = reinterpret_cast<const H*>(__cumsum_matrix);
+    const H *_make_last_b_matrix         = reinterpret_cast<const H*>(__make_last_b_matrix);
+    const H *_make_last_coeff_1_matrix   = reinterpret_cast<const H*>(__make_last_coeff_1_matrix);
+
+    const H *_XA             = reinterpret_cast<const H*>(__XA) + blockIdx.x * (NC*CS*HF);
+    const H *_XB             = reinterpret_cast<const H*>(__XB) + blockIdx.x * (NC*CS*HF);
+    const H *_XC             = reinterpret_cast<const H*>(__XC) + blockIdx.x * (NC*CS*HF);
+    const H *_Coeff          = reinterpret_cast<const H*>(__Coeff) + blockIdx.x * (NC*CS*CS);
+    H *_Output = reinterpret_cast<H*>(__Output) + blockIdx.x * (NC*CS*HF);
+
+    extern __shared__ alignment_dummy __shm[]; // this is the CUDA shared memory
+    shared_allocator al((int*)&__shm[0]);
+
+    st_hf<1, 4, ducks::st_layout::swizzle> (&XB_smem)[SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, SMEM_POOL>();
+    st_hf<1, 4, ducks::st_layout::swizzle> (&XC_smem)[SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, SMEM_POOL>();
+    st_hf<1, 4, ducks::st_layout::swizzle> (&XA_smem)[SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, SMEM_POOL>();
+    st_hf<1, 1, ducks::st_layout::swizzle> (&Coeff_smem)[SMEM_POOL] = al.allocate<st_hf<1, 1, ducks::st_layout::swizzle>, SMEM_POOL>();
+
+    rt_hf<4, 4, kittens::ducks::rt_layout::col> W1_reg;
+    load(W1_reg, _W1, W1_reg.cols);
+
+    rt_hf<1, 4> b1_reg;
+    load(b1_reg, _b1, b1_reg.cols);
+
+    rt_hf<1, 4> ln_w_reg;
+    rt_hf<1, 4> ln_b_reg;
+    load(ln_w_reg, _ln_weight, ln_w_reg.cols);
+    load(ln_b_reg, _ln_bias, ln_b_reg.cols);
+
+    rt_hf<1, 1> cumsum_matrix_bf;
+    rt_hf<1, 1> make_last_b_matrix_bf;
+    rt_hf<1, 4, kittens::ducks::rt_layout::col> make_last_coeff_1_matrix_col;
+    load(cumsum_matrix_bf, _cumsum_matrix, cumsum_matrix_bf.cols);
+    load(make_last_b_matrix_bf, _make_last_b_matrix, make_last_b_matrix_bf.cols);  // [K,K] @ [K,f] -> [K,f] broadcast last row of b_bar
+    load(make_last_coeff_1_matrix_col, _make_last_coeff_1_matrix, make_last_coeff_1_matrix_col.cols);
+
+    for (int i = 0; i < NC; i++) {
+
+        if (i % SMEM_POOL == 0) {
+            for (int j = 0; j < SMEM_POOL; j++) {
+                load(XA_smem[j], _XA + (i + j) * X_STRIDE, 64);
+                load(XB_smem[j], _XB + (i + j) * X_STRIDE, 64);
+                load(XC_smem[j], _XC + (i + j) * X_STRIDE, 64);
+                load(Coeff_smem[j], _Coeff + (i + j) * Coeff_STRIDE, 16);
+            }
+        }
+
+        // Forward
+        rt_hf<1, 4> XB_reg;
+        load(XB_reg, XB_smem[i % SMEM_POOL]);
+
+        rt_hf<1, 4> Z1_reg;
+        mma_AB(Z1_reg, XB_reg, W1_reg, b1_reg); // [K,f]r <- [K,f]r @ [f,f]c + [K,f]r
+
+        rt_hf<1, 4> XA_reg;
+        load(XA_reg, XA_smem[i % SMEM_POOL]);
+        sub(XA_reg, XA_reg, XB_reg);  // l2_tgt = XA - XB
+
+        // LN fwd + bwd
+        rt_hf<1, 4>::col_vec Z1_mean_reg;
+        row_sum(Z1_mean_reg, Z1_reg);  // [K,f]
+        div(Z1_mean_reg, Z1_mean_reg, __float2half(float(HF)));
+
+        rt_hf<1, 4> Z1_square_reg;
+        sub_row(Z1_square_reg, Z1_reg, Z1_mean_reg);
+        mul(Z1_square_reg, Z1_square_reg, Z1_square_reg); // (Z1 - mu) ** 2
+
+        rt_hf<1, 4>::col_vec Z1_std_reg;
+        row_sum(Z1_std_reg, Z1_square_reg);  // [K,f]
+        div(Z1_std_reg, Z1_std_reg, __float2half(float(HF)));
+        add(Z1_std_reg, Z1_std_reg, __float2half(1e-6f));
+        sqrt(Z1_std_reg, Z1_std_reg);
+
+        rt_hf<1, 4> Z1_hat;  // normalized Z1 with 0 mean and 1 std
+        sub_row(Z1_hat, Z1_reg, Z1_mean_reg);
+        div_row(Z1_hat, Z1_hat, Z1_std_reg);
+
+        rt_hf<1, 4> LN_out_reg;  // affined by LN scale and bias
+        mul(LN_out_reg, Z1_hat, ln_w_reg);  // [K,f] * [K,f]
+        add(LN_out_reg, LN_out_reg, ln_b_reg);
+
+        rt_hf<1, 4> dl_dZ1_hat;
+        sub(dl_dZ1_hat, LN_out_reg, XA_reg);
+        mul(dl_dZ1_hat, dl_dZ1_hat, ln_w_reg);
+
+        rt_hf<1, 4> dl_dZ1;
+        mul(dl_dZ1, dl_dZ1_hat, __float2half(float(HF)));  // HF * dl_dZ1_hat
+
+        rt_hf<1, 4>::col_vec dl_dZ1_vec_term;
+        row_sum(dl_dZ1_vec_term, dl_dZ1_hat);
+        sub_row(dl_dZ1, dl_dZ1, dl_dZ1_vec_term);   // HF * dl_dZ1_hat - dl_dZ1_hat.sum(dim=-1, keepdim=True)
+
+        rt_hf<1, 4> dl_dZ1_term_3;
+        mul(dl_dZ1_term_3, dl_dZ1_hat, Z1_hat);
+        row_sum(dl_dZ1_vec_term, dl_dZ1_term_3);
+        mul_row(dl_dZ1_term_3, Z1_hat, dl_dZ1_vec_term);
+
+        sub(dl_dZ1, dl_dZ1, dl_dZ1_term_3);
+        mul(Z1_std_reg, Z1_std_reg, __float2half(float(HF)));
+        div_row(dl_dZ1, dl_dZ1, Z1_std_reg);
+
+        // Get b1_bar of chunk: b1_bar = b1 - cumsum(dl_dZ1, dim=0): [K,f]
+        rt_hf<1, 4, ducks::rt_layout::col> &dl_dZ1_col = swap_layout_inplace(dl_dZ1);  // [K,f]
+        rt_hf<1, 4> delta_b1_reg;
+        zero(delta_b1_reg);
+
+        rt_hf<1, 1> coeff_reg;
+        load(coeff_reg, Coeff_smem[i % SMEM_POOL]);
+        rt_hf<1, 1> Attn1_reg;
+        mul(Attn1_reg, coeff_reg, cumsum_matrix_bf);
+        mma_AB(delta_b1_reg, Attn1_reg, dl_dZ1_col, delta_b1_reg);  // delta_b1 = (coeff * Attn) @ dl_dZ1
+
+        sub(b1_reg, b1_reg, delta_b1_reg);  // b1_bar = b1 - delta_b1
+
+        // 2nd forward
+        rt_hf<1, 4> XC_reg;
+        load(XC_reg, XC_smem[i % SMEM_POOL]);
+
+        zero(Attn1_reg);
+        mma_ABt(Attn1_reg, XC_reg, XB_reg, Attn1_reg);
+
+        make_causal(Attn1_reg, Attn1_reg, base_types::constants<half>::zero());
+        mul(Attn1_reg, coeff_reg, Attn1_reg);
+
+        rt_hf<1, 4> Z1_bar_term_1_reg;
+        mma_AB(Z1_bar_term_1_reg, XC_reg, W1_reg, b1_reg); // [K,f']r <- [K,f]r @ [f,f']c + [K,f']r
+
+        rt_hf<1, 4> Z1_bar_term_2_reg;
+        zero(Z1_bar_term_2_reg);
+        mma_AB(Z1_bar_term_2_reg, Attn1_reg, dl_dZ1_col, Z1_bar_term_2_reg);  // [K,f]r <- [K,K]r, [K,f]c
+
+        sub(Z1_bar_term_1_reg, Z1_bar_term_1_reg, Z1_bar_term_2_reg);
+
+        // Output = XC + LN(Z2_bar)
+        rt_hf<1, 4> &Z1_bar_reg = Z1_bar_term_1_reg;
+        rt_hf<1, 4>::col_vec Z1_bar_mean_reg;
+        row_sum(Z1_bar_mean_reg, Z1_bar_reg);  // [K,f]
+        div(Z1_bar_mean_reg, Z1_bar_mean_reg, __float2half(float(HF)));
+
+        rt_hf<1, 4> Z1_bar_square_reg;
+        sub_row(Z1_bar_square_reg, Z1_bar_reg, Z1_bar_mean_reg);
+        mul(Z1_bar_square_reg, Z1_bar_square_reg, Z1_bar_square_reg); // (Z1 - mu) ** 2
+
+        rt_hf<1, 4>::col_vec Z1_bar_std_reg;
+        row_sum(Z1_bar_std_reg, Z1_bar_square_reg);  // [K,f]
+        div(Z1_bar_std_reg, Z1_bar_std_reg, __float2half(float(HF)));
+        add(Z1_bar_std_reg, Z1_bar_std_reg, __float2half(1e-6f));
+        sqrt(Z1_bar_std_reg, Z1_bar_std_reg);
+
+        rt_hf<1, 4> Z1_bar_hat;  // normalized Z1 with 0 mean and 1 std
+        sub_row(Z1_bar_hat, Z1_bar_reg, Z1_bar_mean_reg);
+        div_row(Z1_bar_hat, Z1_bar_hat, Z1_bar_std_reg);
+
+        rt_hf<1, 4> LN_out_bar_reg;  // affined by LN scale and bias
+        mul(LN_out_bar_reg, Z1_bar_hat, ln_w_reg);  // [K,f] * [K,f]
+        add(LN_out_bar_reg, LN_out_bar_reg, ln_b_reg);
+
+        // Add residual
+        add(LN_out_bar_reg, LN_out_bar_reg, XC_reg);
+
+        store(_Output + i * CS * HF, LN_out_bar_reg, LN_out_bar_reg.cols);  // @xinhao: XC + LN(Z1_bar) can be done outside
+
+        // delta_W1 at the last token in chunk
+        rt_hf<1, 4> coeff_1_last_reg;
+        zero(coeff_1_last_reg);
+        rt_hf<1, 1> &coeff_transpose_reg = transpose_inplace(coeff_reg);
+        mma_AB(coeff_1_last_reg, coeff_transpose_reg, make_last_coeff_1_matrix_col, coeff_1_last_reg); // [K,f]r <- [K,K]r, [K,f]c
+        mul(XB_reg, XB_reg, coeff_1_last_reg);
+
+        rt_hf<1, 4, kittens::ducks::rt_layout::col> &XB_col_reg = swap_layout_inplace(XB_reg);
+        rt_hf<4, 4> delta_W1_reg;
+        zero(delta_W1_reg);
+        mma_AtB(delta_W1_reg, XB_col_reg, dl_dZ1_col, delta_W1_reg);
+
+        rt_hf<4, 4, kittens::ducks::rt_layout::col> &delta_W1_col_reg = swap_layout_inplace(delta_W1_reg);
+        sub(W1_reg, W1_reg, delta_W1_col_reg);
+
+        rt_hf<1, 4, kittens::ducks::rt_layout::col> b1_bar_col_reg;
+        swap_layout(b1_bar_col_reg, b1_reg);
+        zero(b1_reg);
+        mma_AB(b1_reg, make_last_b_matrix_bf, b1_bar_col_reg, b1_reg);  // [K,f]r <- [K,K]r @ [K,f]c + 0[K,f]r
+
+    }
+
+    store(_W1, W1_reg, W1_reg.cols);
+    store(_b1, b1_reg, b1_reg.cols);
+
+}
+
+
+void
+prefill_whole_loop_LN_bias_res_PLN_fp16
+        (
+                torch::Tensor W1,
+                torch::Tensor b1,
+                torch::Tensor ln_weight,
+                torch::Tensor ln_bias,
+                torch::Tensor cumsum_matrix,
+                torch::Tensor make_last_b_matrix,
+                torch::Tensor make_last_coeff_1_matrix,
+                torch::Tensor XA,
+                torch::Tensor XB,
+                torch::Tensor XC,
+                torch::Tensor Coeff,
+                torch::Tensor Output,
+                cudaStream_t stream
+        ) {
+    auto batch = XA.size(0);
+    auto head = XA.size(1);
+    auto NC = XA.size(2);
+    auto CS = XA.size(3);
+    auto HF = XA.size(4);
+
+    using H = __half;
+    using T = c10::Half;
+    const int workers = 1;
+
+    auto threads = workers * kittens::WARP_THREADS;
+
+    prefill_whole_loop_LN_bias_res_PLN_fp16_ker<H, T><<<batch * head, threads, SMEM_BLOCK, stream>>>(
+            head, NC, CS, HF,
+            W1.data_ptr<T>(), b1.data_ptr<T>(),
+            ln_weight.data_ptr<T>(), ln_bias.data_ptr<T>(),
+            cumsum_matrix.data_ptr<T>(), make_last_b_matrix.data_ptr<T>(), make_last_coeff_1_matrix.data_ptr<T>(),
+            XA.data_ptr<T>(), XB.data_ptr<T>(), XC.data_ptr<T>(), Coeff.data_ptr<T>(),
+            Output.data_ptr<T>()
+    );
+
+//    CHECK_CUDA_ERROR(cudaDeviceSynchronize());
+
+}
