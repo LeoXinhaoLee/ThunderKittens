@@ -29,7 +29,7 @@ def simple_test(dt, use_ones=False):
     CS = 16
 
     match_module = 'M1'
-    HF_prime = 4 * HF if match_module == 'M2' else HF
+    HF_prime = 4 * HF if match_module == 'ttt_mlp_prefill' else HF
 
     original_state_dict = {
         'W1': torch.randn(BS * NH, HF, HF_prime, device='cuda', dtype=input_dtype) * 0.2,
