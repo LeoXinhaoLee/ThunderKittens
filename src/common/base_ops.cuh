@@ -324,9 +324,28 @@ template<> __device__ inline half_2 sqrt::op<half_2>(const half_2 &x) { return h
 struct tanh {
     template<typename T> static __device__ inline T op(const T &x) { return tanf(x); }
  };
- template<> __device__ inline float tanh::op<float> (const float &x) {return tanf(x); }
- template<> __device__ inline float2 tanh::op<float2>(const float2 &x) { return float2{tanf(x.x), tanf(x.y)}; }
- template<> __device__ inline half tanh::op<half> (const half &x) {return __float2half(tanf(__half2float(x))); }
+ template<> __device__ inline float tanh::op<float> (const float &x) {
+     return tanf(x);
+ }
+ template<> __device__ inline float2 tanh::op<float2>(const float2 &x) {
+     return float2{tanf(x.x), tanf(x.y)};
+ }
+// template<> __device__ inline half tanh::op<half> (const half &x) {
+//     return __float2half(tanf(__half2float(x)));
+// }
+ template<> __device__ inline half tanh::op<half> (const half &x) {
+//         return 2 * F.sigmoid(2 * x) - 1
+    half sigmoid_2x = hrcp(
+            __hadd(
+                __float2half(1.0),
+                hexp(__hmul(__float2half(-2.0), x))
+             )
+     );
+     return __hsub(
+                __hmul(__float2half(2.0), sigmoid_2x),
+                __float2half(1.0)
+             );
+ }
 
  struct cubed {
     template<typename T> static __device__ inline T op(const T &x) { return mul(mul(x,x),x); }
@@ -338,19 +357,37 @@ struct tanh {
  struct gelu {
     template<typename T> static __device__ inline T op(const T &x) { return x; }
  };
- template<> __device__ inline float gelu::op<float> (const float &x) { return 0.5f * x * (1 + tanh::op<float>(base_types::constants<float>::s2pi() * (x + 0.044715f * cubed::op<float>(x)))); }
- template<> __device__ inline float2 gelu::op<float2>(const float2 &x) { return float2{0.5f * x.x * (1 + tanh::op<float>(base_types::constants<float>::s2pi() * (x.x + 0.044715f * cubed::op<float>(x.x)))), 0.5f * x.y * (1 + tanh::op<float>(base_types::constants<float>::s2pi() * (x.y + 0.044715f * cubed::op<float>(x.y))))}; }
+ template<> __device__ inline float gelu::op<float> (const float &x) {
+     return 0.5f * x * (1 + tanh::op<float>(base_types::constants<float>::s2pi() * (x + 0.044715f * cubed::op<float>(x))));
+ }
+ template<> __device__ inline float2 gelu::op<float2>(const float2 &x) {
+     return float2{
+         0.5f * x.x * (1 + tanh::op<float>(base_types::constants<float>::s2pi() * (x.x + 0.044715f * cubed::op<float>(x.x)))),
+         0.5f * x.y * (1 + tanh::op<float>(base_types::constants<float>::s2pi() * (x.y + 0.044715f * cubed::op<float>(x.y))))
+     };
+ }
  template<> __device__ inline half gelu::op<half> (const half &x) {
 //     return 0.5 * x * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))
     return __hmul(
             __hmul(__float2half(0.5), x),
             __hadd(__float2half(1.0),
                    tanh::op<half>(__hmul(__float2half(0.79788456f),
-                                         __hadd(x, __hmul(__float2half(0.044715f), cubed::op<half>(x)))
+                                         __hadd(x, __hmul(__float2half(0.044715f),
+                                                          cubed::op<half>(x)))
                                          )
                                   )
                    )
             );
+
+//    return __hmul(
+//            __hmul(__float2half(0.5f), x),
+//            __hadd(__float2half(1.0f), x)
+//            );
+
+//    float x_fp = __half2float(x);
+//    float y_fp = 0.5f * x_fp * (1 + tanh::op<float>(0.79788456f * (x_fp + 0.044715f * cubed::op<float>(x_fp))));
+//    half y = __float2half(y_fp);
+//    return y;
  }
 
  // @xinhao: add diff_gelu
