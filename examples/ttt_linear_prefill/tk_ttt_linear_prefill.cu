@@ -76,7 +76,7 @@ void ttt_linear_prefill_fp16_ker(
     load(cumsum_matrix, _cumsum_matrix, cumsum_matrix.cols);
     // make_last_b_matrix: broadcast last row of b_bar
     load(make_last_b_matrix, _make_last_b_matrix, make_last_b_matrix.cols);
-    // make_last_eta_1_matrix_col: broadcast last row of eta
+    // make_last_eta_1_matrix_col: broadcast last col of eta_transposed for multiplying X1: [bs,HF]
     load(make_last_eta_1_matrix_col, _make_last_eta_1_matrix, make_last_eta_1_matrix_col.cols);
 
     for (int i = 0; i < n_mini_batch; i++) {
@@ -98,10 +98,10 @@ void ttt_linear_prefill_fp16_ker(
         rt_hf<1, 4> Z1_reg;
         mma_AB(Z1_reg, XK_reg, W1_reg, b1_reg);
 
-        rt_hf<1, 4> XV_reg;
-        load(XV_reg, XV_smem[i % SMEM_POOL]);
+        rt_hf<1, 4> l2_target_reg;
+        load(l2_target_reg, XV_smem[i % SMEM_POOL]);
         // l2_tgt = XV - XK
-        sub(XV_reg, XV_reg, XK_reg);
+        sub(l2_target_reg, l2_target_reg, XK_reg);
 
         // LN fwd
         rt_hf<1, 4>::col_vec Z1_mean_reg;
@@ -134,7 +134,7 @@ void ttt_linear_prefill_fp16_ker(
         //           Z1_hat * (dl_dZ1_hat * Z1_hat).sum(dim=-1, keepdim=True)
         //           ) / (std * HF)
         rt_hf<1, 4> dl_dZ1_hat;
-        sub(dl_dZ1_hat, LN_out_reg, XV_reg);
+        sub(dl_dZ1_hat, LN_out_reg, l2_target_reg);
         mul(dl_dZ1_hat, dl_dZ1_hat, ln_w_reg);
 
         // HF * dl_dZ1_hat
