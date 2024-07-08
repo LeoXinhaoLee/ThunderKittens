@@ -186,7 +186,7 @@ __device__ static inline void relu(T &dst, const T &src) {
     unary_op<base_ops::relu, T>(dst, src);
 }
 
-// Geng: Add sqrt
+// @Genghan: Add sqrt
 template<ducks::rv::all T>
 __device__ static inline void sqrt(T &dst, const T &src) {
     unary_op<base_ops::sqrt, T>(dst, src);
@@ -197,7 +197,7 @@ __device__ static inline void gelu(T &dst, const T &src) {
     unary_op<base_ops::gelu, T>(dst, src);
 }
 
-// @xinhao: add diff_gelu
+// @Xinhao: add diff_gelu
 template<ducks::rv::float_like T>
 __device__ static inline void diff_gelu(T &dst, const T &src) {
 unary_op<base_ops::diff_gelu, T>(dst, src);

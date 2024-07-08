@@ -133,8 +133,8 @@
  template<> __device__ inline float2 relu::op<float2>(const float2 &x) { return float2{max(x.x, 0.f), max(x.y, 0.f)};         }
  template<> __device__ inline bf16   relu::op<bf16>  (const bf16 &x  ) { return __hmax(x, base_types::constants<bf16>::zero());    }
  template<> __device__ inline bf16_2 relu::op<bf16_2>(const bf16_2 &x) { return __hmax2(x, base_types::constants<bf16_2>::zero()); }
- 
- // Geng: Add sqrt
+
+ // @Genghan: Add sqrt
  struct sqrt {
     template<typename T> static __device__ inline T op(const T &x) { return sqrt(x); }
 };
@@ -142,7 +142,7 @@ template<> __device__ inline float  sqrt::op<float> (const float &x ) { return _
 template<> __device__ inline float2 sqrt::op<float2>(const float2 &x) { return float2{__fsqrt_rn(x.x), __fsqrt_rn(x.y)};         }
 template<> __device__ inline bf16   sqrt::op<bf16>  (const bf16 &x  ) { return hsqrt(x);    }
 template<> __device__ inline bf16_2 sqrt::op<bf16_2>(const bf16_2 &x) { return h2sqrt(x); }
-// @xinhao: add half and half_2
+// @Xinhao: add half and half_2
 template<> __device__ inline half   sqrt::op<half>  (const half &x  ) { return hsqrt(x);    }
 template<> __device__ inline half_2 sqrt::op<half_2>(const half_2 &x) { return h2sqrt(x); }
 
@@ -192,7 +192,7 @@ template<> __device__ inline half_2 sqrt::op<half_2>(const half_2 &x) { return h
  template<> __device__ inline float2 sum::op<float2>(const float2 &a, const float2 &b) { return float2{a.x+b.x, a.y+b.y}; }
  template<> __device__ inline bf16   sum::op<bf16>  (const bf16   &a, const bf16   &b) { return __hadd(a, b);             }
  template<> __device__ inline bf16_2 sum::op<bf16_2>(const bf16_2 &a, const bf16_2 &b) { return __hadd2(a, b);            }
- template<> __device__ inline half sum::op<half>(const half &a, const half &b) { return __hadd(a, b);            } // @geng
+ template<> __device__ inline half sum::op<half>(const half &a, const half &b) { return __hadd(a, b);            } // @Genghan
  template<> __device__ inline half_2 sum::op<half_2>(const half_2 &a, const half_2 &b) { return __hadd2(a, b);            }
  /**
   * @brief Subtraction operation.
@@ -210,7 +210,7 @@ template<> __device__ inline half_2 sqrt::op<half_2>(const half_2 &x) { return h
  template<> __device__ inline float2 sub::op<float2>(const float2 &a, const float2 &b) { return float2{a.x-b.x, a.y-b.y}; }
  template<> __device__ inline bf16   sub::op<bf16>  (const bf16   &a, const bf16   &b) { return __hsub(a, b);             }
  template<> __device__ inline bf16_2 sub::op<bf16_2>(const bf16_2 &a, const bf16_2 &b) { return __hsub2(a, b);            }
- template<> __device__ inline half sub::op<half>(const half &a, const half &b) { return __hsub(a, b);            } // @geng
+ template<> __device__ inline half sub::op<half>(const half &a, const half &b) { return __hsub(a, b);            } // @Genghan
  template<> __device__ inline half_2 sub::op<half_2>(const half_2 &a, const half_2 &b) { return __hsub2(a, b);            }
  /**
   * @brief Multiplication operation.
@@ -228,7 +228,7 @@ template<> __device__ inline half_2 sqrt::op<half_2>(const half_2 &x) { return h
  template<> __device__ inline float2 mul::op<float2>(const float2 &a, const float2 &b) { return float2{a.x*b.x, a.y*b.y}; }
  template<> __device__ inline bf16   mul::op<bf16>  (const bf16   &a, const bf16   &b) { return __hmul(a, b);             }
  template<> __device__ inline bf16_2 mul::op<bf16_2>(const bf16_2 &a, const bf16_2 &b) { return __hmul2(a, b);            }
- // @xinhao add half and half_2
+ // @Xinhao add half and half_2
  template<> __device__ inline half mul::op<half>    (const half   &a, const half   &b) { return __hmul(a, b);             }
  template<> __device__ inline half_2 mul::op<half_2>(const half_2 &a, const half_2 &b) { return __hmul2(a, b);            }
  /**
@@ -247,7 +247,7 @@ template<> __device__ inline half_2 sqrt::op<half_2>(const half_2 &x) { return h
  template<> __device__ inline float2 div::op<float2>(const float2 &a, const float2 &b) { return float2{a.x/b.x, a.y/b.y}; }
  template<> __device__ inline bf16   div::op<bf16>  (const bf16   &a, const bf16   &b) { return __hdiv(a, b);             }
  template<> __device__ inline bf16_2 div::op<bf16_2>(const bf16_2 &a, const bf16_2 &b) { return __h2div(a, b);            } // this op is a special snowflake
- // @xinhao add half and half_2
+ // @Xinhao add half and half_2
  template<> __device__ inline half div::op<half>    (const half   &a, const half   &b) { return __hdiv(a, b);             }
  template<> __device__ inline half_2 div::op<half_2>(const half_2 &a, const half_2 &b) { return __h2div(a, b);            }
  /**
@@ -320,7 +320,7 @@ template<> __device__ inline half_2 sqrt::op<half_2>(const half_2 &x) { return h
      }
  };
 
-// Geng: Add gelu
+// @Genghan: Add gelu
 struct tanh {
     template<typename T> static __device__ inline T op(const T &x) { return tanf(x); }
  };
@@ -330,11 +330,8 @@ struct tanh {
  template<> __device__ inline float2 tanh::op<float2>(const float2 &x) {
      return float2{tanf(x.x), tanf(x.y)};
  }
-// template<> __device__ inline half tanh::op<half> (const half &x) {
-//     return __float2half(tanf(__half2float(x)));
-// }
  template<> __device__ inline half tanh::op<half> (const half &x) {
-//         return 2 * F.sigmoid(2 * x) - 1
+//  2 * F.sigmoid(2 * x) - 1
     half sigmoid_2x = hrcp(
             __hadd(
                 __float2half(1.0),
@@ -367,7 +364,7 @@ struct tanh {
      };
  }
  template<> __device__ inline half gelu::op<half> (const half &x) {
-//     return 0.5 * x * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))
+//  0.5 * x * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))
     return __hmul(
             __hmul(__float2half(0.5), x),
             __hadd(__float2half(1.0),
@@ -378,25 +375,14 @@ struct tanh {
                                   )
                    )
             );
-
-//    return __hmul(
-//            __hmul(__float2half(0.5f), x),
-//            __hadd(__float2half(1.0f), x)
-//            );
-
-//    float x_fp = __half2float(x);
-//    float y_fp = 0.5f * x_fp * (1 + tanh::op<float>(0.79788456f * (x_fp + 0.044715f * cubed::op<float>(x_fp))));
-//    half y = __float2half(y_fp);
-//    return y;
  }
 
- // @xinhao: add diff_gelu
+ // @Xinhao: add diff_gelu
  struct diff_gelu {
      template<typename T> static __device__ inline T op(const T &x){
-        return x;
-//         tanh_out = tanh(0.79788456 * x * (1 + 0.044715 * x * x))
-//         ff = 0.5 * x * ((1 - tanh_out * tanh_out) * (0.79788456 + 0.1070322243 * x * x)) + 0.5 * (1 + tanh_out)
-//         return ff
+         tanh_out = tanh(0.79788456 * x * (1 + 0.044715 * x * x))
+         ff = 0.5 * x * ((1 - tanh_out * tanh_out) * (0.79788456 + 0.1070322243 * x * x)) + 0.5 * (1 + tanh_out)
+         return ff
      }
  };
  template<> __device__ inline float diff_gelu::op<float> (const float &x) {
@@ -404,7 +390,7 @@ struct tanh {
      float ff = 0.5 * x * ((1.0 - tanh_out * tanh_out) * (0.79788456f + 0.1070322243f * x * x)) + 0.5 * (1.0 + tanh_out);
      return ff;
  }
- // @xinhao: chatgpt
+ // @Xinhao
  template<> __device__ inline half diff_gelu::op<half> (const half &x) {
      half tanh_input = __hmul(__float2half(0.79788456f), __hmul(x, __hadd(__float2half(1.0f), __hmul(__float2half(0.044715f), __hmul(x, x)))));
      half tanh_out = tanh::op<half>(tanh_input);
@@ -420,7 +406,7 @@ struct tanh {
      return ff;
  }
 
- // Geng
+ // @Genghan
 struct rsqrt {
     template<typename T> static __device__ inline T op(const T &x) { return div(base_types::constants<T>::one(), sqrt(x)); }
 };
@@ -428,7 +414,7 @@ template<> __device__ inline float  rsqrt::op<float> (const float &x ) { return 
 template<> __device__ inline float2 rsqrt::op<float2>(const float2 &x) { return float2{__frsqrt_rn(x.x), __frsqrt_rn(x.y)};         }
 template<> __device__ inline bf16   rsqrt::op<bf16>  (const bf16 &x  ) { return hrsqrt(x);    }
 template<> __device__ inline bf16_2 rsqrt::op<bf16_2>(const bf16_2 &x) { return h2rsqrt(x); }
-// @xinhao: add half and half_2
+// @Xinhao: add half and half_2
 template<> __device__ inline half   rsqrt::op<half>  (const half &x  ) { return hrsqrt(x);    }
 template<> __device__ inline half_2 rsqrt::op<half_2>(const half_2 &x) { return h2rsqrt(x); }
 

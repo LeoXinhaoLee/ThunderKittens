@@ -468,20 +468,20 @@ __device__ static inline void copy(T &dst, const U &src) {
     bin_map<base_ops::copy2, T>(dst, src);
 }
 
-// Geng: Add sqrt
+// @Genghan: Add sqrt
 template<ducks::rt::all T>
 __device__ static inline void sqrt(T &dst, const T &src) {
     unary_map<base_ops::sqrt, T>(dst, src);
 }
 
-// Geng: Add gelu
+// @Genghan: Add gelu
 //template<ducks::rt::float_like T>
 template<ducks::rt::all T>
 __device__ static inline void gelu(T &dst, const T &src) {
 unary_map<base_ops::gelu, T>(dst, src);
 }
 
-// @xinhao: add diff_gelu
+// @Xinhao: add diff_gelu
 //template<ducks::rt::float_like T>
 template<ducks::rt::all T>
 __device__ static inline void diff_gelu(T &dst, const T &src) {

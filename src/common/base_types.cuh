@@ -83,7 +83,7 @@ template<typename T> struct constants {
      */
     static __device__ inline constexpr T neg_infty() { return T{-INFINITY}; }
 
-    // Geng: Add PI
+    // Genghan: Add PI
     static __device__ inline constexpr T pi() {return T{3.1415926};}
 
     static __device__ inline constexpr T s2pi() {return T{0.7978845608028654};}
@@ -93,7 +93,7 @@ template<> struct constants<float2> {
     static __device__ inline constexpr float2 one()       { return float2{1.f, 1.f}; }
     static __device__ inline constexpr float2 pos_infty() { return float2{constants<float>::pos_infty(), constants<float>::pos_infty()}; }
     static __device__ inline constexpr float2 neg_infty() { return float2{constants<float>::neg_infty(), constants<float>::neg_infty()}; }
-    // Geng: Add PI
+    // @Genghan: Add PI
     static __device__ inline constexpr float2 pi()        { return float2{constants<float>::pi(), constants<float>::pi()}; }
     static __device__ inline constexpr float2 s2pi()      { return float2{constants<float>::s2pi(), constants<float>::s2pi()}; }
 };
