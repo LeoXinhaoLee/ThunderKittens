@@ -343,6 +343,9 @@ struct tanh {
                 __float2half(1.0)
              );
  }
+ template<> __device__ inline half_2 tanh::op<half_2> (const half_2 &x) {
+     half_2{tanh::op<half>(x.x), tanh::op<half>(x.y)};
+ }
 
  struct cubed {
     template<typename T> static __device__ inline T op(const T &x) { return mul(mul(x,x),x); }
@@ -350,6 +353,9 @@ struct tanh {
  template<> __device__ inline float cubed::op<float> (const float &x) { return x * x * x; }
  template<> __device__ inline float2 cubed::op<float2>(const float2 &x) { return float2{x.x * x.x * x.x, x.y * x.y* x.y}; }
  template<> __device__ inline half cubed::op<half> (const half &x) { return __hmul(x, __hmul(x, x)); }
+ template<> __device__ inline half_2 cubed::op<half_2> (const half_2 &x) {
+     return half_2{cubed::op<half>(x.x), cubed::op<half>(x.y)};
+ }
 
  struct gelu {
     template<typename T> static __device__ inline T op(const T &x) { return x; }
@@ -376,13 +382,17 @@ struct tanh {
                    )
             );
  }
+ template<> __device__ inline half_2 gelu::op<half_2> (const half_2 &x) {
+//     printf("Gelu Half 2\n");
+     return half_2{gelu::op<half>(x.x), gelu::op<half>(x.y)};
+ }
 
  // @Xinhao: add diff_gelu
  struct diff_gelu {
      template<typename T> static __device__ inline T op(const T &x){
-         tanh_out = tanh(0.79788456 * x * (1 + 0.044715 * x * x))
-         ff = 0.5 * x * ((1 - tanh_out * tanh_out) * (0.79788456 + 0.1070322243 * x * x)) + 0.5 * (1 + tanh_out)
-         return ff
+         T tanh_out = tanh::op<T>(0.79788456 * x * (1 + 0.044715 * x * x));
+         T ff = 0.5 * x * ((1 - tanh_out * tanh_out) * (0.79788456 + 0.1070322243 * x * x)) + 0.5 * (1 + tanh_out);
+         return ff;
      }
  };
  template<> __device__ inline float diff_gelu::op<float> (const float &x) {
@@ -404,6 +414,11 @@ struct tanh {
      half ff_2 = __hmul(__float2half(0.5f), __hadd(__float2half(1.0f), tanh_out));
      half ff = __hadd(ff_1, ff_2);
      return ff;
+ }
+
+ template<> __device__ inline half_2 diff_gelu::op<half_2> (const half_2 &x) {
+//     printf("Diff Gelu Half 2\n");
+     return half_2{diff_gelu::op<half>(x.x), diff_gelu::op<half>(x.y)};
  }
 
  // @Genghan

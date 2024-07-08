@@ -114,6 +114,7 @@ void ttt_mlp_prefill_fp16_ker(
         // X2 = gelu(Z1)
         rt_hf<1, 16> X2_reg;
         gelu(X2_reg, Z1_reg);
+//        rt_hf<1, 16> &X2_reg = Z1_reg;  // @xinhao: for testing time without gelu, which is 30% faster at model level
 
         // Z2 = X2 @ W2 + b2
         rt_hf<1, 4> Z2_reg;
@@ -211,7 +212,7 @@ void ttt_mlp_prefill_fp16_ker(
 
         // dl_dZ1 = dl_dX2 * diff_gelu(Z1)
         rt_hf<1, 16> &diff_gelu_Z1_reg = Z1_reg;
-        diff_gelu(diff_gelu_Z1_reg, Z1_reg);
+        diff_gelu(diff_gelu_Z1_reg, Z1_reg);   // @xinhao: comment out for testing time without gelu, which is 30% faster at model level
         mul(dl_dZ1_reg, dl_dZ1_reg, diff_gelu_Z1_reg);
 
         // delta b1 = (eta_chunk * Attn_b) @ dl_dZ1
@@ -273,7 +274,7 @@ void ttt_mlp_prefill_fp16_ker(
 
         // X2_bar = gelu(Z1_bar)
         rt_hf<1, 16> &X2_bar_reg = Z1_bar_term_1_reg;
-        gelu(X2_bar_reg, Z1_bar_term_1_reg);
+        gelu(X2_bar_reg, Z1_bar_term_1_reg);  // @xinhao: comment out for testing time without gelu, which is 30% faster at model level
 
         // Attn2 = eta * Tril(X2_bar @ X2.t)
         zero(Attn_reg);
