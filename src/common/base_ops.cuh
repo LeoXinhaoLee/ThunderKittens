@@ -415,7 +415,6 @@ struct tanh {
      half ff = __hadd(ff_1, ff_2);
      return ff;
  }
-
  template<> __device__ inline half_2 diff_gelu::op<half_2> (const half_2 &x) {
 //     printf("Diff Gelu Half 2\n");
      return half_2{diff_gelu::op<half>(x.x), diff_gelu::op<half>(x.y)};
