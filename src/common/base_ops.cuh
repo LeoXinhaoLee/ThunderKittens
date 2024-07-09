@@ -322,13 +322,13 @@ template<> __device__ inline half_2 sqrt::op<half_2>(const half_2 &x) { return h
 
 // @Genghan: Add gelu
 struct tanh {
-    template<typename T> static __device__ inline T op(const T &x) { return tanf(x); }
+    template<typename T> static __device__ inline T op(const T &x) { return sub(1, div(2, sum(1,exp(mul(2.0,x))))); }
  };
  template<> __device__ inline float tanh::op<float> (const float &x) {
-     return tanf(x);
+     return 1 - 2 / (2.0 * x + 1);
  }
  template<> __device__ inline float2 tanh::op<float2>(const float2 &x) {
-     return float2{tanf(x.x), tanf(x.y)};
+     return float2{tanh::op<float>(x.x), tanh::op<float>(x.y)};
  }
  template<> __device__ inline half tanh::op<half> (const half &x) {
 //  2 * F.sigmoid(2 * x) - 1
@@ -432,6 +432,9 @@ template<> __device__ inline bf16_2 rsqrt::op<bf16_2>(const bf16_2 &x) { return 
 template<> __device__ inline half   rsqrt::op<half>  (const half &x  ) { return hrsqrt(x);    }
 template<> __device__ inline half_2 rsqrt::op<half_2>(const half_2 &x) { return h2rsqrt(x); }
 
+struct no_op {
+    template<typename T> static __device__ inline T op(const T &x) { return x; }
+};
  
  } // namespace base_ops
  

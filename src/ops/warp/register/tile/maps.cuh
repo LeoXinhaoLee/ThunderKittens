@@ -475,22 +475,27 @@ __device__ static inline void sqrt(T &dst, const T &src) {
 }
 
 // @Genghan: Add gelu
-//template<ducks::rt::float_like T>
-template<ducks::rt::all T>
+template<ducks::rt::float_like T>
+// template<ducks::rt::all T>
 __device__ static inline void gelu(T &dst, const T &src) {
-unary_map<base_ops::gelu, T>(dst, src);
+    unary_map<base_ops::gelu, T>(dst, src);
 }
 
 // @Xinhao: add diff_gelu
-//template<ducks::rt::float_like T>
-template<ducks::rt::all T>
+template<ducks::rt::float_like T>
+// template<ducks::rt::all T>
 __device__ static inline void diff_gelu(T &dst, const T &src) {
-unary_map<base_ops::diff_gelu, T>(dst, src);
+    unary_map<base_ops::diff_gelu, T>(dst, src);
 }
 
 template<ducks::rt::all T>
 __device__ static inline void rsqrt(T &dst, const T &src) {
     unary_map<base_ops::rsqrt, T>(dst, src);
+}
+
+template<ducks::rt::all T>
+__device__ static inline void no_op(T &dst, const T &src) {
+    unary_map<base_ops::no_op, T>(dst, src);
 }
 
 /**

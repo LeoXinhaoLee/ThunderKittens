@@ -109,7 +109,7 @@ template<typename T>
 concept col_layout = all<T> && std::is_same_v<typename T::layout, ducks::rt_layout::col>;
 
 template<typename T>
-concept float_like = all<T> && (std::is_same_v<typename T::dtype, float> || std::is_same_v<typename T::dtype, float2> );
+concept float_like = all<T> && (std::is_same_v<typename T::dtype, float> || std::is_same_v<typename T::dtype, float2> || std::is_same_v<typename T::dtype, half> || std::is_same_v<typename T::dtype, half2>);
 
 } // namespace rt
 } // namespace ducks
