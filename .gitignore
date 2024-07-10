@@ -8,10 +8,10 @@
 .DS_Store
 examples/ttt_linear_prefill/build/
 examples/ttt_linear_prefill/dist/
-examples/ttt_linear_prefill/ttt_linear_prefill.egg-info/
+examples/ttt_linear_prefill/tk_ttt_linear_prefill.egg-info/
 examples/ttt_mlp_prefill/build/
 examples/ttt_mlp_prefill/dist/
-examples/ttt_mlp_prefill/ttt_mlp_prefill.egg-info/
+examples/ttt_mlp_prefill/tk_ttt_mlp_prefill.egg-info/
 examples/ttt_mlp_prefill/*backup.cu
 src/common/pyutils/__pycache__/
 examples/.DS_Store
