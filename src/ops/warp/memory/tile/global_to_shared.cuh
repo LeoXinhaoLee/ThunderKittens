@@ -237,4 +237,34 @@ __device__ static inline void store_async(bf16 *dst, const ST &src, const int ro
     }
 }
 
+template<ducks::st::all ST>
+__device__ static inline void store_async(half *dst, const ST &src, const int row_stride, cuda::barrier<cuda::thread_scope_block> &barrier) {
+    // each thread needs to do 1 call per width*height
+    // attempting to improve striping into dram
+    // each lane of the warp should store sequential into dram
+
+    int laneid = threadIdx.x % 32;
+
+    // we can handle this many rows each time we run a memcpy_async
+    int elem_per_memcpy = sizeof(float4)/sizeof(half);
+    int memcpy_per_row = src.cols / elem_per_memcpy;
+    int total_calls = src.height * src.width;
+
+    #pragma unroll
+    for(int i = 0; i < total_calls; i++) {
+
+        int idx = i * 32 + laneid;
+        
+        int row = idx / memcpy_per_row;
+        int col = (idx*elem_per_memcpy) % src.cols;
+
+        cuda::memcpy_async(
+            (void*)(&dst[row*row_stride + col]),
+            (void*)(&src[{row, col}]),
+            cuda::aligned_size_t<16>(sizeof(float4)),
+            barrier
+        );
+    }
+}
+
 }
