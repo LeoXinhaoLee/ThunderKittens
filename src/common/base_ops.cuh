@@ -387,6 +387,31 @@ struct tanh {
      return half_2{gelu::op<half>(x.x), gelu::op<half>(x.y)};
  }
 
+
+ struct gelu_erf {
+    template<typename T> static __device__ inline T op(const T &x) { return x; }
+ };
+
+ template<> __device__ inline float gelu_erf::op<float> (const float& x) {
+    return x * 0.5 * (1.0 + erff(x * base_types::constants<float>::sqhalf()));
+ }
+
+ template<> __device__ inline float2 gelu_erf::op<float2> (const float2& x) {
+    return float2{gelu_erf::op<float>(x.x), gelu_erf::op<float>(x.y)};
+ }
+
+ template<> __device__ inline half gelu_erf::op<half> (const half& x) {
+    float x_float = __half2float(x);
+    float res_float = gelu_erf::op<float>(x_float);
+    return __float2half_rn(res_float);
+ }
+
+ template<> __device__ inline half2 gelu_erf::op<half2> (const half2& x) {
+    float2 x_float = __half22float2(x);
+    float2 res_float = float2{gelu_erf::op<float>(x_float.x), gelu_erf::op<float>(x_float.y)};
+    return __float22half2_rn(res_float);
+ }
+
  // @Xinhao: add diff_gelu
  struct diff_gelu {
      template<typename T> static __device__ inline T op(const T &x){

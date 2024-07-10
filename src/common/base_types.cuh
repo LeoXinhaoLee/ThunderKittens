@@ -87,6 +87,8 @@ template<typename T> struct constants {
     static __device__ inline constexpr T pi() {return T{3.1415926};}
 
     static __device__ inline constexpr T s2pi() {return T{0.7978845608028654};}
+
+    static __device__ inline constexpr T sqhalf() {return T{0.7071067811865476};}
 };
 template<> struct constants<float2> {
     static __device__ inline constexpr float2 zero()      { return float2{0.f, 0.f}; }
@@ -96,6 +98,7 @@ template<> struct constants<float2> {
     // @Genghan: Add PI
     static __device__ inline constexpr float2 pi()        { return float2{constants<float>::pi(), constants<float>::pi()}; }
     static __device__ inline constexpr float2 s2pi()      { return float2{constants<float>::s2pi(), constants<float>::s2pi()}; }
+    static __device__ inline constexpr float2 sqhalf()    { return float2{constants<float>::sqhalf(), constants<float>::sqhalf()};}
 };
 template<> struct constants<bf16> {
     static __device__ inline constexpr bf16 zero()      { return std::bit_cast<__nv_bfloat16>(uint16_t(0x0000)); } // unfortunately __float2bf16_rn is not constexpr
