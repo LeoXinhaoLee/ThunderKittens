@@ -19,7 +19,8 @@ using namespace nvcuda;
 #define Eta_STRIDE 256    // 16 * 16
 #define SMEM_POOL 1
 #define SMEM_STAGE 2
-#define SMEM_BLOCK SMEM_STAGE * SMEM_POOL * (3 * X_STRIDE + Eta_STRIDE) * 2  // bytes: XV/XK/XQ/Eta
+// #define SMEM_BLOCK SMEM_STAGE * SMEM_POOL * (3 * X_STRIDE + Eta_STRIDE) * 2  // bytes: XV/XK/XQ/Eta
+#define SMEM_BLOCK SMEM_STAGE * SMEM_POOL * 3 * X_STRIDE * 2
 
 using namespace kittens;
 
@@ -63,7 +64,7 @@ void ttt_mlp_prefill_fp16_ker(
     st_hf<1, 4, ducks::st_layout::swizzle> (&XV_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
     st_hf<1, 4, ducks::st_layout::swizzle> (&XK_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
     st_hf<1, 4, ducks::st_layout::swizzle> (&XQ_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
-    st_hf<1, 1, ducks::st_layout::swizzle> (&Eta_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 1, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
+    // st_hf<1, 1, ducks::st_layout::swizzle> (&Eta_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 1, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
 
     rt_hf<4, 16, kittens::ducks::rt_layout::col> W1_col_reg;
     rt_hf<16, 4, kittens::ducks::rt_layout::col> W2_col_reg;
@@ -103,7 +104,7 @@ void ttt_mlp_prefill_fp16_ker(
         load_async(XV_smem[tic][j], _XV + j * X_STRIDE, 64,  qkve_barrier);
         load_async(XK_smem[tic][j], _XK + j * X_STRIDE, 64,  qkve_barrier);
         load_async(XQ_smem[tic][j], _XQ + j * X_STRIDE, 64,  qkve_barrier);
-        load_async(Eta_smem[tic][j], _Eta + j * Eta_STRIDE, 16,  qkve_barrier);
+        // load_async(Eta_smem[tic][j], _Eta + j * Eta_STRIDE, 16,  qkve_barrier);
     }
 
     for (int i = 0; i < n_mini_batch; i++) {
@@ -118,7 +119,7 @@ void ttt_mlp_prefill_fp16_ker(
                     load_async(XV_smem[toc][j], _XV + cur_offset * X_STRIDE, 64, qkve_barrier);
                     load_async(XK_smem[toc][j], _XK + cur_offset * X_STRIDE, 64, qkve_barrier);
                     load_async(XQ_smem[toc][j], _XQ + cur_offset * X_STRIDE, 64, qkve_barrier);
-                    load_async(Eta_smem[toc][j], _Eta + cur_offset * Eta_STRIDE, 16,  qkve_barrier);
+                    // load_async(Eta_smem[toc][j], _Eta + cur_offset * Eta_STRIDE, 16,  qkve_barrier);
                 }
             }
         }
@@ -206,7 +207,8 @@ void ttt_mlp_prefill_fp16_ker(
         // eta_transpose: [bs,bs], each col corresp to eta for 1 token in mini-batch (the last col corresp to last token's)
         rt_hf<1, 1> eta_reg;
         rt_hf<1, 1> eta_transpose_reg;
-        load(eta_reg, Eta_smem[tic][i % SMEM_POOL]);
+        // load(eta_reg, Eta_smem[tic][i % SMEM_POOL]);
+        load(eta_reg, _Eta + i * Eta_STRIDE, 16);
         transpose_sep(eta_transpose_reg, eta_reg);
 
         // eta_last_X2 = (eta_transpose @ [0...0|1].t) * X2
