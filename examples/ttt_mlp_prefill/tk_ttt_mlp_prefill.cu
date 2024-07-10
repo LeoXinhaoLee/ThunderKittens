@@ -19,8 +19,8 @@ using namespace nvcuda;
 #define Eta_STRIDE 256    // 16 * 16
 #define SMEM_POOL 1
 #define SMEM_STAGE 2
-// #define SMEM_BLOCK SMEM_STAGE * SMEM_POOL * (3 * X_STRIDE + Eta_STRIDE) * 2  // bytes: XV/XK/XQ/Eta
-#define SMEM_BLOCK SMEM_STAGE * SMEM_POOL * 4 * X_STRIDE * 2
+// #define SMEM_BLOCK SMEM_STAGE * SMEM_POOL * (4 * X_STRIDE + Eta_STRIDE) * 2  // bytes: XV/XK/XQ/Eta
+#define SMEM_BLOCK SMEM_STAGE * SMEM_POOL * 3 * X_STRIDE * 2
 
 using namespace kittens;
 
@@ -62,7 +62,7 @@ void ttt_mlp_prefill_fp16_ker(
     shared_allocator al((int*)&__shm[0]);
 
     st_hf<1, 4, ducks::st_layout::swizzle> (&XV_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
-    st_hf<1, 4, ducks::st_layout::swizzle> (&XK_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
+    // st_hf<1, 4, ducks::st_layout::swizzle> (&XK_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
     st_hf<1, 4, ducks::st_layout::swizzle> (&XQ_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
     st_hf<1, 4, ducks::st_layout::swizzle> &Out_smem = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>>();
     // st_hf<1, 1, ducks::st_layout::swizzle> (&Eta_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 1, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
@@ -102,9 +102,10 @@ void ttt_mlp_prefill_fp16_ker(
     if (threadIdx.x == 0) {init(&qkve_barrier, block.size()); init(&o_barrier, block.size());}
     block.sync();
 
+    #pragma unroll
     for (int j = 0; j < SMEM_POOL; j++) {
         load_async(XV_smem[tic][j], _XV + j * X_STRIDE, 64,  qkve_barrier);
-        load_async(XK_smem[tic][j], _XK + j * X_STRIDE, 64,  qkve_barrier);
+        // load_async(XK_smem[tic][j], _XK + j * X_STRIDE, 64,  qkve_barrier);
         load_async(XQ_smem[tic][j], _XQ + j * X_STRIDE, 64,  qkve_barrier);
         // load_async(Eta_smem[tic][j], _Eta + j * Eta_STRIDE, 16,  qkve_barrier);
     }
@@ -115,11 +116,12 @@ void ttt_mlp_prefill_fp16_ker(
 
         // Prefetch a mini-batch into shared memory
         if (i % SMEM_POOL == 0) {
+            #pragma unroll
             for (int j = 0; j < SMEM_POOL; j++) {
                 int cur_offset = i + SMEM_POOL + j;
                 if (cur_offset < n_mini_batch) {
                     load_async(XV_smem[toc][j], _XV + cur_offset * X_STRIDE, 64, qkve_barrier);
-                    load_async(XK_smem[toc][j], _XK + cur_offset * X_STRIDE, 64, qkve_barrier);
+                    // load_async(XK_smem[toc][j], _XK + cur_offset * X_STRIDE, 64, qkve_barrier);
                     load_async(XQ_smem[toc][j], _XQ + cur_offset * X_STRIDE, 64, qkve_barrier);
                     // load_async(Eta_smem[toc][j], _Eta + cur_offset * Eta_STRIDE, 16,  qkve_barrier);
                 }
@@ -128,7 +130,8 @@ void ttt_mlp_prefill_fp16_ker(
 
         // Z1 = XK @ W1 + b1
         rt_hf<1, 4> XK_reg;
-        load(XK_reg, XK_smem[tic][i % SMEM_POOL]);
+        // load(XK_reg, XK_smem[tic][i % SMEM_POOL]);
+        load(XK_reg, _XK + i * X_STRIDE, 64);
 
         rt_hf<1, 16> Z1_reg;
         mma_AB(Z1_reg, XK_reg, W1_col_reg, b1_reg);
@@ -147,6 +150,7 @@ void ttt_mlp_prefill_fp16_ker(
         // l2_tgt = XV - XK
         rt_hf<1, 4> l2_target_reg;
         load(l2_target_reg, XV_smem[tic][i % SMEM_POOL]);
+        // load(l2_target_reg, _XV + i * X_STRIDE, 64);
         sub(l2_target_reg, l2_target_reg, XK_reg);
 
         // LN fwd

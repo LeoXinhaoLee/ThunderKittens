@@ -357,6 +357,10 @@ struct tanh {
      return half_2{cubed::op<half>(x.x), cubed::op<half>(x.y)};
  }
 
+ static __device__ inline constexpr half p5() {return std::bit_cast<__half>(uint16_t(0x3800));}
+ static __device__ inline constexpr half p79788456() {return std::bit_cast<__half>(uint16_t(0x3A62));}
+ static __device__ inline constexpr half p044715() {return std::bit_cast<__half>(uint16_t(0x29B9));}
+
  struct gelu {
     template<typename T> static __device__ inline T op(const T &x) { return x; }
  };
@@ -369,13 +373,14 @@ struct tanh {
          0.5f * x.y * (1 + tanh::op<float>(base_types::constants<float>::s2pi() * (x.y + 0.044715f * cubed::op<float>(x.y))))
      };
  }
- template<> __device__ inline half gelu::op<half> (const half &x) {
+
+template<> __device__ inline half gelu::op<half> (const half &x) {
 //  0.5 * x * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))
     return __hmul(
-            __hmul(__float2half(0.5), x),
-            __hadd(__float2half(1.0),
-                   tanh::op<half>(__hmul(__float2half(0.79788456f),
-                                         __hadd(x, __hmul(__float2half(0.044715f),
+            __hmul(p5(), x),
+            __hadd(base_types::constants<half>::one(),
+                   tanh::op<half>(__hmul(p79788456(),
+                                         __hadd(x, __hmul(p044715(),
                                                           cubed::op<half>(x)))
                                          )
                                   )
