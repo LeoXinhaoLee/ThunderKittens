@@ -40,7 +40,7 @@ def jit_build(name, debug=False, gpu_type='4090'):
 def cuda_extension(name, debug, gpu_type): 
     _cuda_flags  = [
                     '--use_fast_math',
-                    '--generate-line-info', 
+                    # '--generate-line-info', 
                     '--restrict',
                     # '-std=c++2a',
                     '-std=c++20',
@@ -70,7 +70,7 @@ def cuda_extension(name, debug, gpu_type):
                             '-std=c++20',
                             # '-std=c++2a',
                         ],
-                                            'nvcc' : ['-O3'] + _cuda_flags}, 
+                                            'nvcc' : ['-O2'] + _cuda_flags}, 
                         libraries=['cuda'])
 
 def library_build(name, debug=False):
