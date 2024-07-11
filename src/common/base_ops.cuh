@@ -344,7 +344,7 @@ struct tanh {
              );
  }
  template<> __device__ inline half_2 tanh::op<half_2> (const half_2 &x) {
-     half_2{tanh::op<half>(x.x), tanh::op<half>(x.y)};
+     return half_2{tanh::op<half>(x.x), tanh::op<half>(x.y)};
  }
 
  struct cubed {
@@ -375,18 +375,40 @@ struct tanh {
  }
 
 template<> __device__ inline half gelu::op<half> (const half &x) {
-//  0.5 * x * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))
+//  f = 0.5 * x * (1 + tanh(0.79788456 * (x + 0.044715 * x * x * x)))
+//  y = 0.79788456 * (x + 0.044715 * x * x * x)
+//  f = 0.5 * x * (1 + 1 - 2 * e^{-y} / (e^{y} + e^{-y})) = x * (1 - 1 / (1 + e^{2y})) = x * e^{2y} / (1 + e^{2y})
+// 2y = 2 * 0.79788456 * (x + 0.044715 * x * x * x) = 1.59576912 * ( x + 0.044715 * x * x * x) = 1.59576912 * x + 0.0713548162 * x * x * x
+// ey = exp(1.59576912 * x + 0.0713548162 * x * x * x))
+//  f = x * ey / (1 + ey)
+    // return __hmul(
+    //         __hmul(p5(), x),
+    //         __hadd(base_types::constants<half>::one(),
+    //                tanh::op<half>(__hmul(p79788456(),
+    //                                      __hadd(x, __hmul(p044715(),
+    //                                                       cubed::op<half>(x)))
+    //                                      )
+    //                               )
+    //                )
+    //         );
+    half ey = hexp(__hadd(
+        __hmul(__float2half_rn(1.59576912), x),
+        __hmul(__float2half_rn(0.0713548162), cubed::op<half>(x)))
+    );
     return __hmul(
-            __hmul(p5(), x),
-            __hadd(base_types::constants<half>::one(),
-                   tanh::op<half>(__hmul(p79788456(),
-                                         __hadd(x, __hmul(p044715(),
-                                                          cubed::op<half>(x)))
-                                         )
-                                  )
-                   )
-            );
+        x,
+        __hmul(
+            ey,
+            hrcp(
+                __hadd(
+                    base_types::constants<half>::one(),
+                    ey
+                )
+            )
+        )
+    );
  }
+
  template<> __device__ inline half_2 gelu::op<half_2> (const half_2 &x) {
 //     printf("Gelu Half 2\n");
      return half_2{gelu::op<half>(x.x), gelu::op<half>(x.y)};
