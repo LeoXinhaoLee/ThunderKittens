@@ -113,6 +113,7 @@ void ttt_mlp_prefill_fp16_ker(
     load_async(XV_smem[tic][0], _XV , 64,  qkve_barrier);
     load_async(XK_smem[tic][0], _XK , 64,  qkve_barrier);
     load_async(XQ_smem[tic][0], _XQ , 64,  qkve_barrier);
+    // load_async(Eta_smem[tic][0], _Eta , 16,  qkve_barrier);
 
     int cur_offset;
 
@@ -164,7 +165,8 @@ void ttt_mlp_prefill_fp16_ker(
         // mu = Z2.mean(dim=-1)
         rt_hf<1, 4>::col_vec Z2_mean_reg;
         row_sum(Z2_mean_reg, Z2_reg);
-        div(Z2_mean_reg, Z2_mean_reg, __float2half(float(HF)));
+        // div(Z2_mean_reg, Z2_mean_reg, __float2half(float(HF))); // 1 / HF = 0.015625
+        mul(Z2_mean_reg, Z2_mean_reg, __float2half(0.015625));
 
         // var = (Z1 - mu) ** 2
         rt_hf<1, 4> Z2_square_reg;
@@ -174,7 +176,8 @@ void ttt_mlp_prefill_fp16_ker(
         // std = sqrt(var.mean(dim=-1) + eps)
         rt_hf<1, 4>::col_vec Z2_std_reg;
         row_sum(Z2_std_reg, Z2_square_reg);  // [K,f]
-        div(Z2_std_reg, Z2_std_reg, __float2half(float(HF)));
+        // div(Z2_std_reg, Z2_std_reg, __float2half(float(HF)));
+        mul(Z2_std_reg, Z2_std_reg, __float2half(0.015625));
         add(Z2_std_reg, Z2_std_reg, __float2half(1e-6f));
         sqrt(Z2_std_reg, Z2_std_reg);
 
@@ -194,7 +197,7 @@ void ttt_mlp_prefill_fp16_ker(
             load_async(XV_smem[toc][0], _XV + cur_offset * X_STRIDE, 64, qkve_barrier);
             load_async(XK_smem[toc][0], _XK + cur_offset * X_STRIDE, 64, qkve_barrier);
             load_async(XQ_smem[toc][0], _XQ + cur_offset * X_STRIDE, 64, qkve_barrier);
-            // load_async(Eta_smem[toc][j], _Eta + cur_offset * Eta_STRIDE, 16,  qkve_barrier);
+            // load_async(Eta_smem[toc][0], _Eta + cur_offset * Eta_STRIDE, 16,  qkve_barrier);
         }
         
 
@@ -216,13 +219,12 @@ void ttt_mlp_prefill_fp16_ker(
         row_sum(dl_dZ2_vec_term, dl_dZ2_hat);
         sub_row(dl_dZ2_reg, dl_dZ2_reg, dl_dZ2_vec_term);
 
+    
         // Z2_hat * (dl_dZ2_hat * Z2_hat).sum(dim=-1, keepdim=True)
         rt_hf<1, 4> dl_dZ2_term_3;
         mul(dl_dZ2_term_3, dl_dZ2_hat, Z2_hat);
         row_sum(dl_dZ2_vec_term, dl_dZ2_term_3);
         mul_row(dl_dZ2_term_3, Z2_hat, dl_dZ2_vec_term);
-
-
 
         sub(dl_dZ2_reg, dl_dZ2_reg, dl_dZ2_term_3);
         mul(Z2_std_reg, Z2_std_reg, __float2half(float(HF)));
@@ -230,9 +232,11 @@ void ttt_mlp_prefill_fp16_ker(
 
         // eta: [bs,bs], each row corresp to eta for 1 token in mini-batch
         // eta_transpose: [bs,bs], each col corresp to eta for 1 token in mini-batch (the last col corresp to last token's)
+        // rt_hf<1, 1> eta_reg;
+        // rt_hf<1, 1> eta_transpose_reg;
+        // load(eta_reg, Eta_smem[tic][i % SMEM_POOL]);
         rt_hf<1, 1> eta_reg;
         rt_hf<1, 1> eta_transpose_reg;
-        // load(eta_reg, Eta_smem[tic][i % SMEM_POOL]);
         load(eta_reg, _Eta + i * Eta_STRIDE, 16);
         transpose_sep(eta_transpose_reg, eta_reg);
 
@@ -357,7 +361,8 @@ void ttt_mlp_prefill_fp16_ker(
         rt_hf<1, 4> &Z2_bar_reg = Z2_bar_term_1_reg;
         rt_hf<1, 4>::col_vec Z2_bar_mean_reg;
         row_sum(Z2_bar_mean_reg, Z2_bar_reg);  // [K,f]
-        div(Z2_bar_mean_reg, Z2_bar_mean_reg, __float2half(float(HF)));
+        // div(Z2_bar_mean_reg, Z2_bar_mean_reg, __float2half(float(HF)));
+        mul(Z2_bar_mean_reg, Z2_bar_mean_reg, __float2half(0.015625));
 
         rt_hf<1, 4> Z2_bar_square_reg;
         sub_row(Z2_bar_square_reg, Z2_bar_reg, Z2_bar_mean_reg);
@@ -365,7 +370,8 @@ void ttt_mlp_prefill_fp16_ker(
 
         rt_hf<1, 4>::col_vec Z2_bar_std_reg;
         row_sum(Z2_bar_std_reg, Z2_bar_square_reg);  // [K,f]
-        div(Z2_bar_std_reg, Z2_bar_std_reg, __float2half(float(HF)));
+        // div(Z2_bar_std_reg, Z2_bar_std_reg, __float2half(float(HF)));
+        mul(Z2_bar_std_reg, Z2_bar_std_reg, __float2half(0.015625));
         add(Z2_bar_std_reg, Z2_bar_std_reg, __float2half(1e-6f));
         sqrt(Z2_bar_std_reg, Z2_bar_std_reg);
 
