@@ -391,22 +391,34 @@ template<> __device__ inline half gelu::op<half> (const half &x) {
     //                               )
     //                )
     //         );
-    half ey = hexp(__hadd(
-        __hmul(__float2half_rn(1.59576912), x),
-        __hmul(__float2half_rn(0.0713548162), cubed::op<half>(x)))
-    );
+//    half ey = hexp(__hadd(
+//        __hmul(__float2half_rn(1.59576912), x),
+//        __hmul(__float2half_rn(0.0713548162), cubed::op<half>(x)))
+//    );
+//    return __hmul(
+//        x,
+//        __hmul(
+//            ey,
+//            hrcp(
+//                __hadd(
+//                    base_types::constants<half>::one(),
+//                    ey
+//                )
+//            )
+//        )
+//    );
+
     return __hmul(
-        x,
-        __hmul(
-            ey,
-            hrcp(
-                __hadd(
-                    base_types::constants<half>::one(),
-                    ey
-                )
+            __hmul(__float2half(0.5), x),
+            __hadd(__float2half(1.0),
+                   tanh::op<half>(__hmul(__float2half(0.79788456f),
+                                         __hadd(x, __hmul(__float2half(0.044715f),
+                                                          cubed::op<half>(x)))
+                                  )
+                   )
             )
-        )
     );
+
  }
 
  template<> __device__ inline half_2 gelu::op<half_2> (const half_2 &x) {

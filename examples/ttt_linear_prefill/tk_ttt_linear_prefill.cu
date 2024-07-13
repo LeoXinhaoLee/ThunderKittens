@@ -79,10 +79,10 @@ void ttt_linear_prefill_fp16_ker(
     for (int i = 0; i < n_mini_batch; i++) {
 
         // Prefetch a mini-batch into shared memory
-        load(XV_smem[0],  _XV,  64);
-        load(XK_smem[0],  _XK,  64);
-        load(XQ_smem[0],  _XQ,  64);
-        load(Eta_smem[0], _Eta, 16);
+        load(XV_smem[0],  _XV  + i * X_STRIDE,  64);
+        load(XK_smem[0],  _XK  + i * X_STRIDE,  64);
+        load(XQ_smem[0],  _XQ  + i * X_STRIDE,  64);
+        load(Eta_smem[0], _Eta + i * Eta_STRIDE, 16);
 
         // Z1 = XK @ W1 + b1
         rt_hf<1, 4> XK_reg;
@@ -95,61 +95,6 @@ void ttt_linear_prefill_fp16_ker(
         load(l2_target_reg, XV_smem[0]);
         // l2_tgt = XV - XK
         sub(l2_target_reg, l2_target_reg, XK_reg);
-
-        /***
-        // LN fwd
-        rt_hf<1, 4>::col_vec Z1_mean_reg;
-        row_sum(Z1_mean_reg, Z1_reg);
-        div(Z1_mean_reg, Z1_mean_reg, __float2half(float(HF)));
-
-        rt_hf<1, 4> Z1_square_reg;
-        sub_row(Z1_square_reg, Z1_reg, Z1_mean_reg);
-        mul(Z1_square_reg, Z1_square_reg, Z1_square_reg);
-
-        rt_hf<1, 4>::col_vec Z1_std_reg;
-        row_sum(Z1_std_reg, Z1_square_reg);
-        div(Z1_std_reg, Z1_std_reg, __float2half(float(HF)));
-        add(Z1_std_reg, Z1_std_reg, __float2half(1e-6f));
-        sqrt(Z1_std_reg, Z1_std_reg);
-
-        // Z1_hat = (Z - mu) / std
-        rt_hf<1, 4> Z1_hat;
-        sub_row(Z1_hat, Z1_reg, Z1_mean_reg);
-        div_row(Z1_hat, Z1_hat, Z1_std_reg);
-
-        // LN_out = ln_w * Z1_hat + ln_b
-        rt_hf<1, 4> LN_out_reg;
-        mul(LN_out_reg, Z1_hat, ln_w_reg);
-        add(LN_out_reg, LN_out_reg, ln_b_reg);
-
-        // LN bwd
-        // dl_dZ1 = (HF * dl_dZ1_hat -
-        //           dl_dZ1_hat.sum(dim=-1, keepdim=True) -
-        //           Z1_hat * (dl_dZ1_hat * Z1_hat).sum(dim=-1, keepdim=True)
-        //           ) / (std * HF)
-        rt_hf<1, 4> dl_dZ1_hat;
-        sub(dl_dZ1_hat, LN_out_reg, l2_target_reg);
-        mul(dl_dZ1_hat, dl_dZ1_hat, ln_w_reg);
-
-        // HF * dl_dZ1_hat
-        rt_hf<1, 4> dl_dZ1;
-        mul(dl_dZ1, dl_dZ1_hat, __float2half(float(HF)));
-
-        // HF * dl_dZ1_hat - dl_dZ1_hat.sum(dim=-1, keepdim=True)
-        rt_hf<1, 4>::col_vec dl_dZ1_vec_term;
-        row_sum(dl_dZ1_vec_term, dl_dZ1_hat);
-        sub_row(dl_dZ1, dl_dZ1, dl_dZ1_vec_term);
-
-        // Z1_hat * (dl_dZ1_hat * Z1_hat).sum(dim=-1, keepdim=True)
-        rt_hf<1, 4> dl_dZ1_term_3;
-        mul(dl_dZ1_term_3, dl_dZ1_hat, Z1_hat);
-        row_sum(dl_dZ1_vec_term, dl_dZ1_term_3);
-        mul_row(dl_dZ1_term_3, Z1_hat, dl_dZ1_vec_term);
-
-        sub(dl_dZ1, dl_dZ1, dl_dZ1_term_3);
-        mul(Z1_std_reg, Z1_std_reg, __float2half(float(HF)));
-        div_row(dl_dZ1, dl_dZ1, Z1_std_reg);
-        ***/
 
         rt_hf<1, 4> dl_dZ1;
         ln_fused_l2_bwd_fp16(HF, Z1_reg, l2_target_reg, ln_w_reg, ln_b_reg, dl_dZ1);
@@ -183,32 +128,6 @@ void ttt_linear_prefill_fp16_ker(
         mma_AB(Z1_bar_term_2_reg, Attn1_reg, dl_dZ1_col, Z1_bar_term_2_reg);
 
         sub(Z1_bar_term_1_reg, Z1_bar_term_1_reg, Z1_bar_term_2_reg);
-
-        /***
-        // LN(Z2_bar)
-        rt_hf<1, 4> &Z1_bar_reg = Z1_bar_term_1_reg;
-        rt_hf<1, 4>::col_vec Z1_bar_mean_reg;
-        row_sum(Z1_bar_mean_reg, Z1_bar_reg);
-        div(Z1_bar_mean_reg, Z1_bar_mean_reg, __float2half(float(HF)));
-
-        rt_hf<1, 4> Z1_bar_square_reg;
-        sub_row(Z1_bar_square_reg, Z1_bar_reg, Z1_bar_mean_reg);
-        mul(Z1_bar_square_reg, Z1_bar_square_reg, Z1_bar_square_reg);
-
-        rt_hf<1, 4>::col_vec Z1_bar_std_reg;
-        row_sum(Z1_bar_std_reg, Z1_bar_square_reg);
-        div(Z1_bar_std_reg, Z1_bar_std_reg, __float2half(float(HF)));
-        add(Z1_bar_std_reg, Z1_bar_std_reg, __float2half(1e-6f));
-        sqrt(Z1_bar_std_reg, Z1_bar_std_reg);
-
-        rt_hf<1, 4> Z1_bar_hat;
-        sub_row(Z1_bar_hat, Z1_bar_reg, Z1_bar_mean_reg);
-        div_row(Z1_bar_hat, Z1_bar_hat, Z1_bar_std_reg);
-
-        rt_hf<1, 4> LN_out_bar_reg;
-        mul(LN_out_bar_reg, Z1_bar_hat, ln_w_reg);
-        add(LN_out_bar_reg, LN_out_bar_reg, ln_b_reg);
-        ***/
 
         rt_hf<1, 4> &Z1_bar_reg = Z1_bar_term_1_reg;
         rt_hf<1, 4> LN_out_bar_reg;
