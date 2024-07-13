@@ -8,7 +8,8 @@
 using namespace nvcuda;
 
 # include "../../src/kittens.cuh"
-# include "../../src/common/pyutils/torch_helpers.cuh"
+//# include "../../src/common/pyutils/torch_helpers.cuh"
+# include "tk_ln.cuh"
 
 // **** ASYn_mini_batch In_mini_batchLUDE *****
 #include <cuda/pipeline>
@@ -148,9 +149,6 @@ void ttt_mlp_prefill_fp16_ker(
         // X2 = gelu(Z1)
         rt_hf<1, 16> X2_reg;
         gelu(X2_reg, Z1_reg);
-        // no_op(X2_reg, Z1_reg);
-        // gelu_erf(X2_reg, Z1_reg);
-//        rt_hf<1, 16> &X2_reg = Z1_reg;  // @xinhao: for testing time without gelu, which is 30% faster at model level
 
         // Z2 = X2 @ W2 + b2
         rt_hf<1, 4> Z2_reg;
@@ -159,9 +157,12 @@ void ttt_mlp_prefill_fp16_ker(
         // l2_tgt = XV - XK
         rt_hf<1, 4> l2_target_reg;
         load(l2_target_reg, XV_smem[tic][i % SMEM_POOL]);
-        // load(l2_target_reg, _XV + i * X_STRIDE, 64);
         sub(l2_target_reg, l2_target_reg, XK_reg);
 
+        rt_hf<1, 4> dl_dZ2_reg;
+        ln_fused_l2_bwd_fp16(HF, Z2_reg, l2_target_reg, ln_w_reg, ln_b_reg, dl_dZ2_reg);
+
+        /***
         // LN fwd
         // mu = Z2.mean(dim=-1)
         rt_hf<1, 4>::col_vec Z2_mean_reg;
@@ -191,6 +192,7 @@ void ttt_mlp_prefill_fp16_ker(
         rt_hf<1, 4> LN_out_reg;
         mul(LN_out_reg, Z2_hat, ln_w_reg);
         add(LN_out_reg, LN_out_reg, ln_b_reg);
+         ***/
 
         // Special case for SMEM_POOL=1
         cur_offset = i + 1;
@@ -200,36 +202,6 @@ void ttt_mlp_prefill_fp16_ker(
             load_async(XQ_smem[toc][0], _XQ + cur_offset * X_STRIDE, 64, qkve_barrier);
             // load_async(Eta_smem[toc][0], _Eta + cur_offset * Eta_STRIDE, 16,  qkve_barrier);
         }
-        
-
-        // LN bwd
-        // dl_dZ2 = (HF * dl_dZ2_hat -
-        //           dl_dZ2_hat.sum(dim=-1, keepdim=True) -
-        //           Z2_hat * (dl_dZ2_hat * Z2_hat).sum(dim=-1, keepdim=True)
-        //           ) / (std * HF)
-        rt_hf<1, 4> dl_dZ2_hat;
-        sub(dl_dZ2_hat, LN_out_reg, l2_target_reg);
-        mul(dl_dZ2_hat, dl_dZ2_hat, ln_w_reg);
-
-        // HF * dl_dZ1_hat
-        rt_hf<1, 4> dl_dZ2_reg;
-        mul(dl_dZ2_reg, dl_dZ2_hat, __float2half(float(HF)));
-
-        // HF * dl_dZ2_hat - dl_dZ2_hat.sum(dim=-1, keepdim=True)
-        rt_hf<1, 4>::col_vec dl_dZ2_vec_term;
-        row_sum(dl_dZ2_vec_term, dl_dZ2_hat);
-        sub_row(dl_dZ2_reg, dl_dZ2_reg, dl_dZ2_vec_term);
-
-    
-        // Z2_hat * (dl_dZ2_hat * Z2_hat).sum(dim=-1, keepdim=True)
-        rt_hf<1, 4> dl_dZ2_term_3;
-        mul(dl_dZ2_term_3, dl_dZ2_hat, Z2_hat);
-        row_sum(dl_dZ2_vec_term, dl_dZ2_term_3);
-        mul_row(dl_dZ2_term_3, Z2_hat, dl_dZ2_vec_term);
-
-        sub(dl_dZ2_reg, dl_dZ2_reg, dl_dZ2_term_3);
-        mul(Z2_std_reg, Z2_std_reg, __float2half(float(HF)));
-        div_row(dl_dZ2_reg, dl_dZ2_reg, Z2_std_reg);
 
         // eta: [bs,bs], each row corresp to eta for 1 token in mini-batch
         // eta_transpose: [bs,bs], each col corresp to eta for 1 token in mini-batch (the last col corresp to last token's)
@@ -265,8 +237,7 @@ void ttt_mlp_prefill_fp16_ker(
 
         // dl_dZ1 = dl_dX2 * diff_gelu(Z1)
         rt_hf<1, 16> &diff_gelu_Z1_reg = Z1_reg;
-        diff_gelu(diff_gelu_Z1_reg, Z1_reg);   // @xinhao: comment out for testing time without gelu, which is 30% faster at model level
-        // no_op(diff_gelu_Z1_reg, Z1_reg);
+        diff_gelu(diff_gelu_Z1_reg, Z1_reg);
         mul(dl_dZ1_reg, dl_dZ1_reg, diff_gelu_Z1_reg);
 
         // delta b1 = (eta_chunk * Attn_b) @ dl_dZ1
@@ -275,15 +246,15 @@ void ttt_mlp_prefill_fp16_ker(
         rt_hf<1, 16, ducks::rt_layout::col> &dl_dZ1_col_reg = swap_layout_inplace(dl_dZ1_reg);  // [K,4f]r->c
         zero(delta_b1_reg);
         // mul(Attn_reg, eta_reg, cumsum_matrix_bf);
-        make_causal(Attn_reg, eta_reg, base_types::constants<half>::zero());
-        mma_AB(delta_b1_reg, Attn_reg, dl_dZ1_col_reg, delta_b1_reg);  // [K,4f]r <- [K,K]r @ [K,4f]c
+        make_causal(eta_reg, eta_reg, base_types::constants<half>::zero());
+        mma_AB(delta_b1_reg, eta_reg, dl_dZ1_col_reg, delta_b1_reg);  // [K,4f]r <- [K,K]r @ [K,4f]c
         // b1_bar = b1 - delta_b1
         sub(b1_reg, b1_reg, delta_b1_reg);
 
         // delta b2 = (eta_chunk * Attn_b) @ dl_dZ2
         rt_hf<1, 4> delta_b2_reg;
         zero(delta_b2_reg);
-        mma_AB(delta_b2_reg, Attn_reg, dl_dZ2_col_reg, delta_b2_reg);  // [K,f]r <- [K,K]r @ [K,f]c
+        mma_AB(delta_b2_reg, eta_reg, dl_dZ2_col_reg, delta_b2_reg);  // [K,f]r <- [K,K]r @ [K,f]c
         // b2_bar = b2 - delta_b2
         sub(b2_reg, b2_reg, delta_b2_reg);
 
@@ -330,9 +301,7 @@ void ttt_mlp_prefill_fp16_ker(
 
         // X2_bar = gelu(Z1_bar)
         rt_hf<1, 16> &X2_bar_reg = Z1_bar_term_1_reg;
-        gelu(X2_bar_reg, Z1_bar_term_1_reg);  // @xinhao: comment out for testing time without gelu, which is 30% faster at model level
-        // no_op(X2_bar_reg, Z1_bar_term_1_reg);
-        // gelu_erf(X2_bar_reg, Z1_bar_term_1_reg);
+        gelu(X2_bar_reg, Z1_bar_term_1_reg);
 
         // Attn2 = eta * Tril(X2_bar @ X2.t)
         zero(Attn_reg);
@@ -359,31 +328,9 @@ void ttt_mlp_prefill_fp16_ker(
 
         sub(Z2_bar_term_1_reg, Z2_bar_term_1_reg, Z2_bar_term_2_reg);
 
-        // LN(Z2_bar)
         rt_hf<1, 4> &Z2_bar_reg = Z2_bar_term_1_reg;
-        rt_hf<1, 4>::col_vec Z2_bar_mean_reg;
-        row_sum(Z2_bar_mean_reg, Z2_bar_reg);  // [K,f]
-        // div(Z2_bar_mean_reg, Z2_bar_mean_reg, __float2half(float(HF)));
-        mul(Z2_bar_mean_reg, Z2_bar_mean_reg, __float2half(0.015625));
-
-        rt_hf<1, 4> Z2_bar_square_reg;
-        sub_row(Z2_bar_square_reg, Z2_bar_reg, Z2_bar_mean_reg);
-        mul(Z2_bar_square_reg, Z2_bar_square_reg, Z2_bar_square_reg); // (Z1 - mu) ** 2
-
-        rt_hf<1, 4>::col_vec Z2_bar_std_reg;
-        row_sum(Z2_bar_std_reg, Z2_bar_square_reg);  // [K,f]
-        // div(Z2_bar_std_reg, Z2_bar_std_reg, __float2half(float(HF)));
-        mul(Z2_bar_std_reg, Z2_bar_std_reg, __float2half(0.015625));
-        add(Z2_bar_std_reg, Z2_bar_std_reg, __float2half(1e-6f));
-        sqrt(Z2_bar_std_reg, Z2_bar_std_reg);
-
-        rt_hf<1, 4> Z2_bar_hat;  // normalized Z1 with 0 mean and 1 std
-        sub_row(Z2_bar_hat, Z2_bar_reg, Z2_bar_mean_reg);
-        div_row(Z2_bar_hat, Z2_bar_hat, Z2_bar_std_reg);
-
-        rt_hf<1, 4> LN_out_bar_reg;  // affined by LN scale and bias
-        mul(LN_out_bar_reg, Z2_bar_hat, ln_w_reg);  // [K,f] * [K,f]
-        add(LN_out_bar_reg, LN_out_bar_reg, ln_b_reg);
+        rt_hf<1, 4> LN_out_bar_reg;
+        LN_fwd_fp16(HF, Z2_bar_reg, ln_w_reg, ln_b_reg, LN_out_bar_reg);
 
         // Output = XQ + LN(Z2_bar)
         add(LN_out_bar_reg, LN_out_bar_reg, XQ_reg);
