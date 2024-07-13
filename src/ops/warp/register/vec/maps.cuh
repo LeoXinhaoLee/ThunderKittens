@@ -197,11 +197,6 @@ __device__ static inline void gelu(T &dst, const T &src) {
     unary_op<base_ops::gelu, T>(dst, src);
 }
 
-template<ducks::rv::float_like T>
-__device__ static inline void gelu_erf(T &dst, const T &src) {
-    unary_op<base_ops::gelu_erf, T>(dst, src);
-}
-
 // @Xinhao: add diff_gelu
 template<ducks::rv::float_like T>
 __device__ static inline void diff_gelu(T &dst, const T &src) {

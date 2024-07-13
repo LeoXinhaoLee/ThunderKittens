@@ -19,10 +19,10 @@ using namespace nvcuda;
 #define W_STRIDE 4096     // 64 * 64
 #define b_STRIDE 64       // 64
 #define Eta_STRIDE 256    // 16 * 16
-#define SMEM_POOL 1
-#define SMEM_BLOCK SMEM_POOL * (3 * X_STRIDE + 2 * Eta_STRIDE) * 2  // bytes: XV/XK/XQ/Eta
+#define SMEM_BLOCK (3 * X_STRIDE + 2 * Eta_STRIDE) * 2  // bytes: XV/XK/XQ/Eta
 
 using namespace kittens;
+
 
 template <typename H, typename T>
 __global__

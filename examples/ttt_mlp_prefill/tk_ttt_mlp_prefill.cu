@@ -17,10 +17,8 @@ using namespace nvcuda;
 #define X_STRIDE 1024     // 16 * 64
 #define W_STRIDE 16384    // 64 * 256
 #define Eta_STRIDE 256    // 16 * 16
-#define SMEM_POOL 1
 #define SMEM_STAGE 2
- #define SMEM_BLOCK SMEM_STAGE * SMEM_POOL * (4 * X_STRIDE + 2 * Eta_STRIDE) * 2  // bytes: XV/XK/XQ/Eta
-//#define SMEM_BLOCK SMEM_STAGE * SMEM_POOL * 4 * X_STRIDE * 2
+#define SMEM_BLOCK SMEM_STAGE * (4 * X_STRIDE + 2 * Eta_STRIDE) * 2  // bytes: XV/XK/XQ/Eta + barrier
 
 using namespace kittens;
 
@@ -91,13 +89,13 @@ void ttt_mlp_prefill_fp16_ker(
     // make_last_eta_2_matrix_col: broadcast last col of eta_transposed for multiplying X2: [bs,HF]
     load(make_last_eta_2_matrix_col, _make_last_eta_2_matrix, make_last_eta_2_matrix_col.cols);
 
+    // 2-stage pipeline
     int tic = 0, toc = 1;
     auto block = cooperative_groups::this_thread_block();
     __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> qkve_barrier;
     if (threadIdx.x == 0) {init(&qkve_barrier, block.size());}
     block.sync();
 
-    // Special case for SMEM_POOL=1
     load_async(XV_smem[tic],  _XV  , 64,  qkve_barrier);
     load_async(XK_smem[tic],  _XK  , 64,  qkve_barrier);
     load_async(XQ_smem[tic],  _XQ  , 64,  qkve_barrier);
@@ -117,13 +115,12 @@ void ttt_mlp_prefill_fp16_ker(
         mma_AB(Z1_reg, XK_reg, W1_col_reg, b1_reg);
 
         // X2 = gelu(Z1)
-        rt_hf<1, 16> X2_reg;          // TODO: real
-        gelu(X2_reg, Z1_reg);         // TODO: real
-//        rt_hf<1, 16> &X2_reg = Z1_reg;  // TODO: debug
+        rt_hf<1, 16> X2_reg;
+        gelu(X2_reg, Z1_reg);
 
         // Z2 = X2 @ W2 + b2
         rt_hf<1, 4> Z2_reg;
-        mma_AB(Z2_reg, X2_reg, W2_col_reg, b2_reg); // [K,f]r <- [K,4f]r @ [4f,f]c + [K,f]
+        mma_AB(Z2_reg, X2_reg, W2_col_reg, b2_reg);
 
         // l2_tgt = XV - XK
         rt_hf<1, 4> l2_target_reg;
@@ -133,7 +130,6 @@ void ttt_mlp_prefill_fp16_ker(
         rt_hf<1, 4> dl_dZ2_reg;
         ln_fused_l2_bwd_fp16(HF, Z2_reg, l2_target_reg, ln_w_reg, ln_b_reg, dl_dZ2_reg);
 
-        // Special case for SMEM_POOL=1
         tgt_offset = i + 1;
         if (tgt_offset < n_mini_batch) {
             load_async(XV_smem[toc],  _XV  + tgt_offset * X_STRIDE,   64,  qkve_barrier);
@@ -174,43 +170,42 @@ void ttt_mlp_prefill_fp16_ker(
         // dl_dZ1 = dl_dX2 * diff_gelu(Z1)
         rt_hf<1, 16> &diff_gelu_Z1_reg = Z1_reg;
         diff_gelu(diff_gelu_Z1_reg, Z1_reg);
-        mul(dl_dZ1_reg, dl_dZ1_reg, diff_gelu_Z1_reg);  // TODO: real
+        mul(dl_dZ1_reg, dl_dZ1_reg, diff_gelu_Z1_reg);
 
         // delta b1 = (eta_chunk * Attn_b) @ dl_dZ1
         rt_hf<1, 16> delta_b1_reg;
         rt_hf<1, 1> Attn_reg;
-        rt_hf<1, 16, ducks::rt_layout::col> &dl_dZ1_col_reg = swap_layout_inplace(dl_dZ1_reg);  // [K,4f]r->c
+        rt_hf<1, 16, ducks::rt_layout::col> &dl_dZ1_col_reg = swap_layout_inplace(dl_dZ1_reg);
         zero(delta_b1_reg);
         // mul(Attn_reg, eta_reg, cumsum_matrix_bf);
         make_causal(eta_reg, eta_reg, base_types::constants<half>::zero());
-        mma_AB(delta_b1_reg, eta_reg, dl_dZ1_col_reg, delta_b1_reg);  // [K,4f]r <- [K,K]r @ [K,4f]c
+        mma_AB(delta_b1_reg, eta_reg, dl_dZ1_col_reg, delta_b1_reg);
         // b1_bar = b1 - delta_b1
         sub(b1_reg, b1_reg, delta_b1_reg);
 
         // delta b2 = (eta_chunk * Attn_b) @ dl_dZ2
         rt_hf<1, 4> delta_b2_reg;
         zero(delta_b2_reg);
-        mma_AB(delta_b2_reg, eta_reg, dl_dZ2_col_reg, delta_b2_reg);  // [K,f]r <- [K,K]r @ [K,f]c
+        mma_AB(delta_b2_reg, eta_reg, dl_dZ2_col_reg, delta_b2_reg);
         // b2_bar = b2 - delta_b2
         sub(b2_reg, b2_reg, delta_b2_reg);
 
         // eta_last_X1 = (eta_transpose @ [0...0|1].t) * X1
         rt_hf<1, 4> eta_last_X1_reg;
         zero(eta_last_X1_reg);
-        mma_AB(eta_last_X1_reg, eta_transpose_reg, make_last_eta_1_matrix_col, eta_last_X1_reg); // [K,f]r <- [K,K]r, [K,f]c
+        mma_AB(eta_last_X1_reg, eta_transpose_reg, make_last_eta_1_matrix_col, eta_last_X1_reg);
         mul(eta_last_X1_reg, XK_reg, eta_last_X1_reg);
         rt_hf<1, 4, ducks::rt_layout::col> &eta_last_X1_col_reg = swap_layout_inplace(eta_last_X1_reg);
 
         // delta W1 = eta_last_X1.transpose(-1,-2) @ dl_dZ1
         rt_hf<4, 16> delta_W1_reg;
         zero(delta_W1_reg);
-        mma_AtB(delta_W1_reg, eta_last_X1_col_reg, dl_dZ1_col_reg, delta_W1_reg);  // [f,4f]r <- ([K,f]c).t @ [K,4f]c
+        mma_AtB(delta_W1_reg, eta_last_X1_col_reg, dl_dZ1_col_reg, delta_W1_reg);
         rt_hf<4, 16, ducks::rt_layout::col> &delta_W1_col_reg = swap_layout_inplace(delta_W1_reg);
 
         // Attn1 = eta * Tril(XQ @ XK.t)
         rt_hf<1, 4> XQ_reg;
         load(XQ_reg, XQ_smem[tic]);
-        // load(XQ_reg, _XQ + i * X_STRIDE, 64);
         zero(Attn_reg);
         mma_ABt(Attn_reg, XQ_reg, XK_reg, Attn_reg);
         make_causal(Attn_reg, Attn_reg, base_types::constants<half>::zero());
@@ -237,11 +232,11 @@ void ttt_mlp_prefill_fp16_ker(
 
         // X2_bar = gelu(Z1_bar)
         rt_hf<1, 16> &X2_bar_reg = Z1_bar_term_1_reg;
-        gelu(X2_bar_reg, Z1_bar_term_1_reg);  // TODO: real
+        gelu(X2_bar_reg, Z1_bar_term_1_reg);
 
         // Attn2 = eta * Tril(X2_bar @ X2.t)
         zero(Attn_reg);
-        mma_ABt(Attn_reg, X2_bar_reg, X2_reg, Attn_reg);  // [K,K]r, [K,f]r -> [K,f]r
+        mma_ABt(Attn_reg, X2_bar_reg, X2_reg, Attn_reg);
         make_causal(Attn_reg, Attn_reg, base_types::constants<half>::zero());
         mul(Attn_reg, eta_reg, Attn_reg);
 
@@ -256,7 +251,7 @@ void ttt_mlp_prefill_fp16_ker(
         rt_hf<1, 4, kittens::ducks::rt_layout::col> b2_bar_col_reg;
         swap_layout(b2_bar_col_reg, b2_reg);
         zero(b2_reg);
-        mma_AB(b2_reg, make_last_b_matrix_bf, b2_bar_col_reg, b2_reg);  // [K,f]r <- [K,K]r @ [K,f]c + 0[K,f]r
+        mma_AB(b2_reg, make_last_b_matrix_bf, b2_bar_col_reg, b2_reg);
 
         rt_hf<1, 4> Z2_bar_term_2_reg;
         zero(Z2_bar_term_2_reg);
@@ -273,7 +268,7 @@ void ttt_mlp_prefill_fp16_ker(
 
         // Store Output
         store(_Output + i * X_STRIDE, LN_out_bar_reg, LN_out_bar_reg.cols);
-         
+
         tic ^= 1;
         toc ^= 1;
 
