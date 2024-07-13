@@ -8,7 +8,8 @@
 using namespace nvcuda;
 
 # include "../../src/kittens.cuh"
-# include "../../src/common/pyutils/torch_helpers.cuh"
+//# include "../../src/common/pyutils/torch_helpers.cuh"
+# include "tk_ln.cuh"
 
 // **** ASYn_mini_batch In_mini_batchLUDE *****
 #include <cuda/pipeline>
@@ -33,7 +34,7 @@ void ttt_mlp_prefill_fp16_ker(
         T* __b1, T* __b2,
         const T* __ln_weight, const T* __ln_bias,
         // const T* __cumsum_matrix, const T* __make_last_b_matrix,
-        const T* __make_last_b_matrix,
+        // const T* __make_last_b_matrix,
         const T* __make_last_eta_1_matrix, const T* __make_last_eta_2_matrix,
         const T* __XV, const T* __XK, const T* __XQ, const T* __Eta,
         T* __Output
@@ -48,7 +49,7 @@ void ttt_mlp_prefill_fp16_ker(
     const H *_ln_bias   = reinterpret_cast<const H*>(__ln_bias) + (blockIdx.x % NH) * (mini_batch_size * HF);
 
     // const H *_cumsum_matrix              = reinterpret_cast<const H*>(__cumsum_matrix);
-    const H *_make_last_b_matrix         = reinterpret_cast<const H*>(__make_last_b_matrix);
+    // const H *_make_last_b_matrix         = reinterpret_cast<const H*>(__make_last_b_matrix);
     const H *_make_last_eta_1_matrix   = reinterpret_cast<const H*>(__make_last_eta_1_matrix);
     const H *_make_last_eta_2_matrix   = reinterpret_cast<const H*>(__make_last_eta_2_matrix);
 
@@ -65,8 +66,7 @@ void ttt_mlp_prefill_fp16_ker(
     st_hf<1, 4, ducks::st_layout::swizzle> (&XV_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
     st_hf<1, 4, ducks::st_layout::swizzle> (&XK_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
     st_hf<1, 4, ducks::st_layout::swizzle> (&XQ_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
-    st_hf<1, 4, ducks::st_layout::swizzle> &Out_smem = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>>();
-    // st_hf<1, 1, ducks::st_layout::swizzle> (&Eta_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 1, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
+    st_hf<1, 1, ducks::st_layout::swizzle> (&Eta_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 1, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
 
     rt_hf<4, 16, kittens::ducks::rt_layout::col> W1_col_reg;
     rt_hf<16, 4, kittens::ducks::rt_layout::col> W2_col_reg;
@@ -84,13 +84,12 @@ void ttt_mlp_prefill_fp16_ker(
     load(ln_w_reg, _ln_weight, ln_w_reg.cols);
     load(ln_b_reg, _ln_bias, ln_b_reg.cols);
 
-    // rt_hf<1, 1> cumsum_matrix_bf;
     rt_hf<1, 1> make_last_b_matrix_bf;
     rt_hf<1, 4, kittens::ducks::rt_layout::col> make_last_eta_1_matrix_col;
     rt_hf<1, 16, kittens::ducks::rt_layout::col> make_last_eta_2_matrix_col;
-    // load(cumsum_matrix_bf, _cumsum_matrix, cumsum_matrix_bf.cols);
     // make_last_b_matrix: broadcast last row of b_bar
-    load(make_last_b_matrix_bf, _make_last_b_matrix, make_last_b_matrix_bf.cols);
+    // load(make_last_b_matrix_bf, _make_last_b_matrix, make_last_b_matrix_bf.cols);
+    initial_col_one(make_last_b_matrix_bf);
     // make_last_eta_1_matrix_col: broadcast last col of eta_transposed for multiplying X1: [bs,HF_prime]
     load(make_last_eta_1_matrix_col, _make_last_eta_1_matrix, make_last_eta_1_matrix_col.cols);
     // make_last_eta_2_matrix_col: broadcast last col of eta_transposed for multiplying X2: [bs,HF]
@@ -99,43 +98,20 @@ void ttt_mlp_prefill_fp16_ker(
     int tic = 0, toc = 1;
     auto block = cooperative_groups::this_thread_block();
     __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> qkve_barrier;
-    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> o_barrier;
-    if (threadIdx.x == 0) {init(&qkve_barrier, block.size()); init(&o_barrier, block.size());}
+    if (threadIdx.x == 0) {init(&qkve_barrier, block.size());}
     block.sync();
 
-    // #pragma unroll
-    // for (int j = 0; j < SMEM_POOL; j++) {
-    //     load_async(XV_smem[tic][j], _XV + j * X_STRIDE, 64,  qkve_barrier);
-    //     load_async(XK_smem[tic][j], _XK + j * X_STRIDE, 64,  qkve_barrier);
-    //     load_async(XQ_smem[tic][j], _XQ + j * X_STRIDE, 64,  qkve_barrier);
-    //     // load_async(Eta_smem[tic][j], _Eta + j * Eta_STRIDE, 16,  qkve_barrier);
-    // }
     // Special case for SMEM_POOL=1
     load_async(XV_smem[tic][0], _XV , 64,  qkve_barrier);
     load_async(XK_smem[tic][0], _XK , 64,  qkve_barrier);
     load_async(XQ_smem[tic][0], _XQ , 64,  qkve_barrier);
-    // load_async(Eta_smem[tic][0], _Eta , 16,  qkve_barrier);
+    load_async(Eta_smem[tic][0], _Eta , 16,  qkve_barrier);
 
     int cur_offset;
 
     for (int i = 0; i < n_mini_batch; i++) {
 
         qkve_barrier.arrive_and_wait();
-
-        // Prefetch a mini-batch into shared memory
-        // if (i % SMEM_POOL == 0) {
-        //     #pragma unroll
-        //     for (int j = 0; j < SMEM_POOL; j++) {
-        //         int cur_offset = i + SMEM_POOL + j;
-        //         if (cur_offset < n_mini_batch) {
-        //             load_async(XV_smem[toc][j], _XV + cur_offset * X_STRIDE, 64, qkve_barrier);
-        //             load_async(XK_smem[toc][j], _XK + cur_offset * X_STRIDE, 64, qkve_barrier);
-        //             load_async(XQ_smem[toc][j], _XQ + cur_offset * X_STRIDE, 64, qkve_barrier);
-        //             // load_async(Eta_smem[toc][j], _Eta + cur_offset * Eta_STRIDE, 16,  qkve_barrier);
-        //         }
-        //     }
-        // }
-
 
         // Z1 = XK @ W1 + b1
         rt_hf<1, 4> XK_reg;
@@ -148,9 +124,6 @@ void ttt_mlp_prefill_fp16_ker(
         // X2 = gelu(Z1)
         rt_hf<1, 16> X2_reg;
         gelu(X2_reg, Z1_reg);
-        // no_op(X2_reg, Z1_reg);
-        // gelu_erf(X2_reg, Z1_reg);
-//        rt_hf<1, 16> &X2_reg = Z1_reg;  // @xinhao: for testing time without gelu, which is 30% faster at model level
 
         // Z2 = X2 @ W2 + b2
         rt_hf<1, 4> Z2_reg;
@@ -159,38 +132,10 @@ void ttt_mlp_prefill_fp16_ker(
         // l2_tgt = XV - XK
         rt_hf<1, 4> l2_target_reg;
         load(l2_target_reg, XV_smem[tic][i % SMEM_POOL]);
-        // load(l2_target_reg, _XV + i * X_STRIDE, 64);
         sub(l2_target_reg, l2_target_reg, XK_reg);
 
-        // LN fwd
-        // mu = Z2.mean(dim=-1)
-        rt_hf<1, 4>::col_vec Z2_mean_reg;
-        row_sum(Z2_mean_reg, Z2_reg);
-        // div(Z2_mean_reg, Z2_mean_reg, __float2half(float(HF))); // 1 / HF = 0.015625
-        mul(Z2_mean_reg, Z2_mean_reg, __float2half(0.015625));
-
-        // var = (Z1 - mu) ** 2
-        rt_hf<1, 4> Z2_square_reg;
-        sub_row(Z2_square_reg, Z2_reg, Z2_mean_reg);
-        mul(Z2_square_reg, Z2_square_reg, Z2_square_reg);
-
-        // std = sqrt(var.mean(dim=-1) + eps)
-        rt_hf<1, 4>::col_vec Z2_std_reg;
-        row_sum(Z2_std_reg, Z2_square_reg);  // [K,f]
-        // div(Z2_std_reg, Z2_std_reg, __float2half(float(HF)));
-        mul(Z2_std_reg, Z2_std_reg, __float2half(0.015625));
-        add(Z2_std_reg, Z2_std_reg, __float2half(1e-6f));
-        sqrt(Z2_std_reg, Z2_std_reg);
-
-        // Z2_hat = (Z2 - mu) / std
-        rt_hf<1, 4> Z2_hat;
-        sub_row(Z2_hat, Z2_reg, Z2_mean_reg);
-        div_row(Z2_hat, Z2_hat, Z2_std_reg);
-
-        // LN_out = ln_w * Z2_hat + ln_b
-        rt_hf<1, 4> LN_out_reg;
-        mul(LN_out_reg, Z2_hat, ln_w_reg);
-        add(LN_out_reg, LN_out_reg, ln_b_reg);
+        rt_hf<1, 4> dl_dZ2_reg;
+        ln_fused_l2_bwd_fp16(HF, Z2_reg, l2_target_reg, ln_w_reg, ln_b_reg, dl_dZ2_reg);
 
         // Special case for SMEM_POOL=1
         cur_offset = i + 1;
@@ -198,47 +143,17 @@ void ttt_mlp_prefill_fp16_ker(
             load_async(XV_smem[toc][0], _XV + cur_offset * X_STRIDE, 64, qkve_barrier);
             load_async(XK_smem[toc][0], _XK + cur_offset * X_STRIDE, 64, qkve_barrier);
             load_async(XQ_smem[toc][0], _XQ + cur_offset * X_STRIDE, 64, qkve_barrier);
-            // load_async(Eta_smem[toc][0], _Eta + cur_offset * Eta_STRIDE, 16,  qkve_barrier);
+            load_async(Eta_smem[toc][0], _Eta + cur_offset * Eta_STRIDE, 16,  qkve_barrier);
         }
-        
-
-        // LN bwd
-        // dl_dZ2 = (HF * dl_dZ2_hat -
-        //           dl_dZ2_hat.sum(dim=-1, keepdim=True) -
-        //           Z2_hat * (dl_dZ2_hat * Z2_hat).sum(dim=-1, keepdim=True)
-        //           ) / (std * HF)
-        rt_hf<1, 4> dl_dZ2_hat;
-        sub(dl_dZ2_hat, LN_out_reg, l2_target_reg);
-        mul(dl_dZ2_hat, dl_dZ2_hat, ln_w_reg);
-
-        // HF * dl_dZ1_hat
-        rt_hf<1, 4> dl_dZ2_reg;
-        mul(dl_dZ2_reg, dl_dZ2_hat, __float2half(float(HF)));
-
-        // HF * dl_dZ2_hat - dl_dZ2_hat.sum(dim=-1, keepdim=True)
-        rt_hf<1, 4>::col_vec dl_dZ2_vec_term;
-        row_sum(dl_dZ2_vec_term, dl_dZ2_hat);
-        sub_row(dl_dZ2_reg, dl_dZ2_reg, dl_dZ2_vec_term);
-
-    
-        // Z2_hat * (dl_dZ2_hat * Z2_hat).sum(dim=-1, keepdim=True)
-        rt_hf<1, 4> dl_dZ2_term_3;
-        mul(dl_dZ2_term_3, dl_dZ2_hat, Z2_hat);
-        row_sum(dl_dZ2_vec_term, dl_dZ2_term_3);
-        mul_row(dl_dZ2_term_3, Z2_hat, dl_dZ2_vec_term);
-
-        sub(dl_dZ2_reg, dl_dZ2_reg, dl_dZ2_term_3);
-        mul(Z2_std_reg, Z2_std_reg, __float2half(float(HF)));
-        div_row(dl_dZ2_reg, dl_dZ2_reg, Z2_std_reg);
 
         // eta: [bs,bs], each row corresp to eta for 1 token in mini-batch
         // eta_transpose: [bs,bs], each col corresp to eta for 1 token in mini-batch (the last col corresp to last token's)
-        // rt_hf<1, 1> eta_reg;
-        // rt_hf<1, 1> eta_transpose_reg;
-        // load(eta_reg, Eta_smem[tic][i % SMEM_POOL]);
         rt_hf<1, 1> eta_reg;
         rt_hf<1, 1> eta_transpose_reg;
-        load(eta_reg, _Eta + i * Eta_STRIDE, 16);
+        load(eta_reg, Eta_smem[tic][i % SMEM_POOL]);
+//        rt_hf<1, 1> eta_reg;
+//        rt_hf<1, 1> eta_transpose_reg;
+//        load(eta_reg, _Eta + i * Eta_STRIDE, 16);
         transpose_sep(eta_transpose_reg, eta_reg);
 
         // eta_last_X2 = (eta_transpose @ [0...0|1].t) * X2
@@ -265,8 +180,7 @@ void ttt_mlp_prefill_fp16_ker(
 
         // dl_dZ1 = dl_dX2 * diff_gelu(Z1)
         rt_hf<1, 16> &diff_gelu_Z1_reg = Z1_reg;
-        diff_gelu(diff_gelu_Z1_reg, Z1_reg);   // @xinhao: comment out for testing time without gelu, which is 30% faster at model level
-        // no_op(diff_gelu_Z1_reg, Z1_reg);
+        diff_gelu(diff_gelu_Z1_reg, Z1_reg);
         mul(dl_dZ1_reg, dl_dZ1_reg, diff_gelu_Z1_reg);
 
         // delta b1 = (eta_chunk * Attn_b) @ dl_dZ1
@@ -275,15 +189,15 @@ void ttt_mlp_prefill_fp16_ker(
         rt_hf<1, 16, ducks::rt_layout::col> &dl_dZ1_col_reg = swap_layout_inplace(dl_dZ1_reg);  // [K,4f]r->c
         zero(delta_b1_reg);
         // mul(Attn_reg, eta_reg, cumsum_matrix_bf);
-        make_causal(Attn_reg, eta_reg, base_types::constants<half>::zero());
-        mma_AB(delta_b1_reg, Attn_reg, dl_dZ1_col_reg, delta_b1_reg);  // [K,4f]r <- [K,K]r @ [K,4f]c
+        make_causal(eta_reg, eta_reg, base_types::constants<half>::zero());
+        mma_AB(delta_b1_reg, eta_reg, dl_dZ1_col_reg, delta_b1_reg);  // [K,4f]r <- [K,K]r @ [K,4f]c
         // b1_bar = b1 - delta_b1
         sub(b1_reg, b1_reg, delta_b1_reg);
 
         // delta b2 = (eta_chunk * Attn_b) @ dl_dZ2
         rt_hf<1, 4> delta_b2_reg;
         zero(delta_b2_reg);
-        mma_AB(delta_b2_reg, Attn_reg, dl_dZ2_col_reg, delta_b2_reg);  // [K,f]r <- [K,K]r @ [K,f]c
+        mma_AB(delta_b2_reg, eta_reg, dl_dZ2_col_reg, delta_b2_reg);  // [K,f]r <- [K,K]r @ [K,f]c
         // b2_bar = b2 - delta_b2
         sub(b2_reg, b2_reg, delta_b2_reg);
 
@@ -330,9 +244,7 @@ void ttt_mlp_prefill_fp16_ker(
 
         // X2_bar = gelu(Z1_bar)
         rt_hf<1, 16> &X2_bar_reg = Z1_bar_term_1_reg;
-        gelu(X2_bar_reg, Z1_bar_term_1_reg);  // @xinhao: comment out for testing time without gelu, which is 30% faster at model level
-        // no_op(X2_bar_reg, Z1_bar_term_1_reg);
-        // gelu_erf(X2_bar_reg, Z1_bar_term_1_reg);
+        gelu(X2_bar_reg, Z1_bar_term_1_reg);
 
         // Attn2 = eta * Tril(X2_bar @ X2.t)
         zero(Attn_reg);
@@ -359,39 +271,15 @@ void ttt_mlp_prefill_fp16_ker(
 
         sub(Z2_bar_term_1_reg, Z2_bar_term_1_reg, Z2_bar_term_2_reg);
 
-        // LN(Z2_bar)
         rt_hf<1, 4> &Z2_bar_reg = Z2_bar_term_1_reg;
-        rt_hf<1, 4>::col_vec Z2_bar_mean_reg;
-        row_sum(Z2_bar_mean_reg, Z2_bar_reg);  // [K,f]
-        // div(Z2_bar_mean_reg, Z2_bar_mean_reg, __float2half(float(HF)));
-        mul(Z2_bar_mean_reg, Z2_bar_mean_reg, __float2half(0.015625));
-
-        rt_hf<1, 4> Z2_bar_square_reg;
-        sub_row(Z2_bar_square_reg, Z2_bar_reg, Z2_bar_mean_reg);
-        mul(Z2_bar_square_reg, Z2_bar_square_reg, Z2_bar_square_reg); // (Z1 - mu) ** 2
-
-        rt_hf<1, 4>::col_vec Z2_bar_std_reg;
-        row_sum(Z2_bar_std_reg, Z2_bar_square_reg);  // [K,f]
-        // div(Z2_bar_std_reg, Z2_bar_std_reg, __float2half(float(HF)));
-        mul(Z2_bar_std_reg, Z2_bar_std_reg, __float2half(0.015625));
-        add(Z2_bar_std_reg, Z2_bar_std_reg, __float2half(1e-6f));
-        sqrt(Z2_bar_std_reg, Z2_bar_std_reg);
-
-        rt_hf<1, 4> Z2_bar_hat;  // normalized Z1 with 0 mean and 1 std
-        sub_row(Z2_bar_hat, Z2_bar_reg, Z2_bar_mean_reg);
-        div_row(Z2_bar_hat, Z2_bar_hat, Z2_bar_std_reg);
-
-        rt_hf<1, 4> LN_out_bar_reg;  // affined by LN scale and bias
-        mul(LN_out_bar_reg, Z2_bar_hat, ln_w_reg);  // [K,f] * [K,f]
-        add(LN_out_bar_reg, LN_out_bar_reg, ln_b_reg);
+        rt_hf<1, 4> LN_out_bar_reg;
+        LN_fwd_fp16(HF, Z2_bar_reg, ln_w_reg, ln_b_reg, LN_out_bar_reg);
 
         // Output = XQ + LN(Z2_bar)
         add(LN_out_bar_reg, LN_out_bar_reg, XQ_reg);
 
         // Store Output
-        store(Out_smem, LN_out_bar_reg);
-        // store(_Output + i * X_STRIDE, LN_out_bar_reg, LN_out_bar_reg.cols);
-        store_async(_Output + i * X_STRIDE, Out_smem, 64, o_barrier);
+         store(_Output + i * X_STRIDE, LN_out_bar_reg, LN_out_bar_reg.cols);
 
         // if ((i + 1) % SMEM_POOL == 0){
         //     tic ^= 1;
@@ -403,12 +291,10 @@ void ttt_mlp_prefill_fp16_ker(
 
     }
 
-    
     store(_W1, W1_col_reg, W1_col_reg.cols);
     store(_W2, W2_col_reg, W2_col_reg.cols);
     store(_b1, b1_reg, b1_reg.cols);
     store(_b2, b2_reg, b2_reg.cols);
-    o_barrier.arrive_and_wait();
 
 }
 
@@ -421,7 +307,7 @@ void ttt_mlp_prefill_fp16(
         torch::Tensor ln_weight,
         torch::Tensor ln_bias,
         // torch::Tensor cumsum_matrix,
-        torch::Tensor make_last_b_matrix,
+        // torch::Tensor make_last_b_matrix,
         torch::Tensor make_last_eta_1_matrix,
         torch::Tensor make_last_eta_2_matrix,
         torch::Tensor XV,
@@ -451,7 +337,7 @@ void ttt_mlp_prefill_fp16(
             b1.data_ptr<T>(), b2.data_ptr<T>(),
             ln_weight.data_ptr<T>(), ln_bias.data_ptr<T>(),
             // cumsum_matrix.data_ptr<T>(), make_last_b_matrix.data_ptr<T>(),
-            make_last_b_matrix.data_ptr<T>(),
+            // make_last_b_matrix.data_ptr<T>(),
             make_last_eta_1_matrix.data_ptr<T>(), make_last_eta_2_matrix.data_ptr<T>(),
             XV.data_ptr<T>(), XK.data_ptr<T>(), XQ.data_ptr<T>(), Eta.data_ptr<T>(),
             Output.data_ptr<T>()
