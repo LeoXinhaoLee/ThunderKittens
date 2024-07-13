@@ -4,7 +4,7 @@
 
 extern void  ttt_linear_prefill_fp16(torch::Tensor W1, torch::Tensor b1,
                                      torch::Tensor ln_weight, torch::Tensor ln_bias,
-                                     torch::Tensor cumsum_matrix, torch::Tensor make_last_b_matrix,
+                                     torch::Tensor make_last_b_matrix,
                                      torch::Tensor make_last_eta_1_matrix,
                                      torch::Tensor XV, torch::Tensor XK, torch::Tensor XQ, torch::Tensor Eta,
                                      torch::Tensor Out,
@@ -12,14 +12,14 @@ extern void  ttt_linear_prefill_fp16(torch::Tensor W1, torch::Tensor b1,
 
 extern void  ttt_linear_prefill_fp16_ref(torch::Tensor W1, torch::Tensor b1,
                                          torch::Tensor ln_weight, torch::Tensor ln_bias,
-                                         torch::Tensor cumsum_matrix, torch::Tensor make_last_b_matrix,
+                                         torch::Tensor make_last_b_matrix,
                                          torch::Tensor make_last_eta_1_matrix,
                                          torch::Tensor XV, torch::Tensor XK, torch::Tensor XQ, torch::Tensor Eta,
                                          torch::Tensor Out)
 {
     auto stream = at::cuda::getCurrentCUDAStream();
     ttt_linear_prefill_fp16(W1, b1, ln_weight, ln_bias,
-                            cumsum_matrix, make_last_b_matrix,
+                            make_last_b_matrix,
                             make_last_eta_1_matrix,
                             XV, XK, XQ, Eta, Out, stream);
 }
