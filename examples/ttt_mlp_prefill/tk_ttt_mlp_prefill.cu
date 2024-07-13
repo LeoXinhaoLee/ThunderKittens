@@ -19,9 +19,9 @@ using namespace nvcuda;
 #define W_STRIDE 16384    // 64 * 256
 #define Eta_STRIDE 256    // 16 * 16
 #define SMEM_POOL 1
-#define SMEM_STAGE 2
+#define SMEM_STAGE 3
 // #define SMEM_BLOCK SMEM_STAGE * SMEM_POOL * (4 * X_STRIDE + Eta_STRIDE) * 2  // bytes: XV/XK/XQ/Eta
-#define SMEM_BLOCK SMEM_STAGE * SMEM_POOL * 4 * X_STRIDE * 2
+#define SMEM_BLOCK SMEM_STAGE * SMEM_POOL * (3 * X_STRIDE + 2 * Eta_STRIDE) * 2
 
 using namespace kittens;
 
@@ -48,7 +48,6 @@ void ttt_mlp_prefill_fp16_ker(
     const H *_ln_weight = reinterpret_cast<const H*>(__ln_weight) + (blockIdx.x % NH) * (mini_batch_size * HF);
     const H *_ln_bias   = reinterpret_cast<const H*>(__ln_bias) + (blockIdx.x % NH) * (mini_batch_size * HF);
 
-    // const H *_cumsum_matrix              = reinterpret_cast<const H*>(__cumsum_matrix);
     const H *_make_last_b_matrix         = reinterpret_cast<const H*>(__make_last_b_matrix);
     const H *_make_last_eta_1_matrix   = reinterpret_cast<const H*>(__make_last_eta_1_matrix);
     const H *_make_last_eta_2_matrix   = reinterpret_cast<const H*>(__make_last_eta_2_matrix);
@@ -63,10 +62,13 @@ void ttt_mlp_prefill_fp16_ker(
     extern __shared__ alignment_dummy __shm[];
     shared_allocator al((int*)&__shm[0]);
 
-    st_hf<1, 4, ducks::st_layout::swizzle> (&XV_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
-    st_hf<1, 4, ducks::st_layout::swizzle> (&XK_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
-    st_hf<1, 4, ducks::st_layout::swizzle> (&XQ_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
-    st_hf<1, 1, ducks::st_layout::swizzle> (&Eta_smem)[2][SMEM_POOL] = al.allocate<st_hf<1, 1, ducks::st_layout::swizzle>, 2, SMEM_POOL>();
+    int stage = 3;
+    int n_barrier = stage - 1;
+
+    st_hf<1, 4, ducks::st_layout::swizzle> (&XV_smem)[3][SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, 3, SMEM_POOL>();
+    st_hf<1, 4, ducks::st_layout::swizzle> (&XK_smem)[3][SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, 3, SMEM_POOL>();
+    st_hf<1, 4, ducks::st_layout::swizzle> (&XQ_smem)[3][SMEM_POOL] = al.allocate<st_hf<1, 4, ducks::st_layout::swizzle>, 3, SMEM_POOL>();
+    st_hf<1, 1, ducks::st_layout::swizzle> (&Eta_smem)[3][SMEM_POOL] = al.allocate<st_hf<1, 1, ducks::st_layout::swizzle>, 3, SMEM_POOL>();
 
     rt_hf<4, 16, kittens::ducks::rt_layout::col> W1_col_reg;
     rt_hf<16, 4, kittens::ducks::rt_layout::col> W2_col_reg;
@@ -93,28 +95,47 @@ void ttt_mlp_prefill_fp16_ker(
     load(make_last_eta_1_matrix_col, _make_last_eta_1_matrix, make_last_eta_1_matrix_col.cols);
     // make_last_eta_2_matrix_col: broadcast last col of eta_transposed for multiplying X2: [bs,HF]
     load(make_last_eta_2_matrix_col, _make_last_eta_2_matrix, make_last_eta_2_matrix_col.cols);
+    
 
-    int tic = 0, toc = 1;
     auto block = cooperative_groups::this_thread_block();
-    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> qkve_barrier;
-    if (threadIdx.x == 0) {init(&qkve_barrier, block.size());}
+    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> qkve_barrier[2];
+//    __shared__ cuda::barrier<cuda::thread_scope::thread_scope_block> qkve_barrier;
+    if (threadIdx.x == 0) {
+//        init(&qkve_barrier, block.size());
+        for (int i = 0; i < 2; i++) {
+            init(&qkve_barrier[i], block.size());
+        }
+    }
     block.sync();
 
     // Special case for SMEM_POOL=1
-    load_async(XV_smem[tic][0], _XV , 64,  qkve_barrier);
-    load_async(XK_smem[tic][0], _XK , 64,  qkve_barrier);
-    load_async(XQ_smem[tic][0], _XQ , 64,  qkve_barrier);
-    load_async(Eta_smem[tic][0], _Eta , 16,  qkve_barrier);
+    load_async(XV_smem[0][0],  _XV ,  64,  qkve_barrier[0]);
+    load_async(XK_smem[0][0],  _XK ,  64,  qkve_barrier[0]);
+    load_async(XQ_smem[0][0],  _XQ ,  64,  qkve_barrier[0]);
+    load_async(Eta_smem[0][0], _Eta , 16,  qkve_barrier[0]);
 
-    int cur_offset;
+    load_async(XV_smem[1][0],  _XV + X_STRIDE,    64, qkve_barrier[1]);
+    load_async(XK_smem[1][0],  _XK + X_STRIDE,    64, qkve_barrier[1]);
+    load_async(XQ_smem[1][0],  _XQ + X_STRIDE,    64, qkve_barrier[1]);
+    load_async(Eta_smem[1][0], _Eta + Eta_STRIDE, 16, qkve_barrier[1]);
+
+    int tgt_offset;
 
     for (int i = 0; i < n_mini_batch; i++) {
 
-        qkve_barrier.arrive_and_wait();
+        qkve_barrier[i % n_barrier].arrive_and_wait();  // make sure SMEM is ready before load
+
+//        tgt_offset = (i + stage - 1);
+//        if (tgt_offset < n_mini_batch) {
+//            load_async(XV_smem[tgt_offset % stage][0],  _XV + tgt_offset * X_STRIDE, 64, qkve_barrier[i % n_barrier]);
+//            load_async(XK_smem[tgt_offset % stage][0],  _XK + tgt_offset * X_STRIDE, 64, qkve_barrier[i % n_barrier]);
+//            load_async(XQ_smem[tgt_offset % stage][0],  _XQ + tgt_offset * X_STRIDE, 64, qkve_barrier[i % n_barrier]);
+//            load_async(Eta_smem[tgt_offset % stage][0], _Eta + tgt_offset * Eta_STRIDE, 16,  qkve_barrier[i % n_barrier]);
+//        }
 
         // Z1 = XK @ W1 + b1
         rt_hf<1, 4> XK_reg;
-        load(XK_reg, XK_smem[tic][i % SMEM_POOL]);
+        load(XK_reg, XK_smem[i % stage][i % SMEM_POOL]);
         // load(XK_reg, _XK + i * X_STRIDE, 64);
 
         rt_hf<1, 16> Z1_reg;
@@ -130,26 +151,27 @@ void ttt_mlp_prefill_fp16_ker(
 
         // l2_tgt = XV - XK
         rt_hf<1, 4> l2_target_reg;
-        load(l2_target_reg, XV_smem[tic][i % SMEM_POOL]);
+        load(l2_target_reg, XV_smem[i % stage][i % SMEM_POOL]);
         sub(l2_target_reg, l2_target_reg, XK_reg);
 
         rt_hf<1, 4> dl_dZ2_reg;
         ln_fused_l2_bwd_fp16(HF, Z2_reg, l2_target_reg, ln_w_reg, ln_b_reg, dl_dZ2_reg);
 
         // Special case for SMEM_POOL=1
-        cur_offset = i + 1;
-        if (cur_offset < n_mini_batch) {
-            load_async(XV_smem[toc][0], _XV + cur_offset * X_STRIDE, 64, qkve_barrier);
-            load_async(XK_smem[toc][0], _XK + cur_offset * X_STRIDE, 64, qkve_barrier);
-            load_async(XQ_smem[toc][0], _XQ + cur_offset * X_STRIDE, 64, qkve_barrier);
-            load_async(Eta_smem[toc][0], _Eta + cur_offset * Eta_STRIDE, 16,  qkve_barrier);
+        // Fetch next mini-batch (2 steps in advance)
+        tgt_offset = (i + stage - 1);
+        if (tgt_offset < n_mini_batch) {
+            load_async(XV_smem[tgt_offset % stage][0],  _XV + tgt_offset * X_STRIDE, 64, qkve_barrier[i % n_barrier]);
+            load_async(XK_smem[tgt_offset % stage][0],  _XK + tgt_offset * X_STRIDE, 64, qkve_barrier[i % n_barrier]);
+            load_async(XQ_smem[tgt_offset % stage][0],  _XQ + tgt_offset * X_STRIDE, 64, qkve_barrier[i % n_barrier]);
+            load_async(Eta_smem[tgt_offset % stage][0], _Eta + tgt_offset * Eta_STRIDE, 16,  qkve_barrier[i % n_barrier]);
         }
 
         // eta: [bs,bs], each row corresp to eta for 1 token in mini-batch
         // eta_transpose: [bs,bs], each col corresp to eta for 1 token in mini-batch (the last col corresp to last token's)
         rt_hf<1, 1> eta_reg;
         rt_hf<1, 1> eta_transpose_reg;
-        load(eta_reg, Eta_smem[tic][i % SMEM_POOL]);
+        load(eta_reg, Eta_smem[i % stage][i % SMEM_POOL]);
 //        rt_hf<1, 1> eta_reg;
 //        rt_hf<1, 1> eta_transpose_reg;
 //        load(eta_reg, _Eta + i * Eta_STRIDE, 16);
@@ -215,7 +237,7 @@ void ttt_mlp_prefill_fp16_ker(
 
         // Attn1 = eta * Tril(XQ @ XK.t)
         rt_hf<1, 4> XQ_reg;
-        load(XQ_reg, XQ_smem[tic][i % SMEM_POOL]);
+        load(XQ_reg, XQ_smem[i % stage][i % SMEM_POOL]);
         // load(XQ_reg, _XQ + i * X_STRIDE, 64);
         zero(Attn_reg);
         mma_ABt(Attn_reg, XQ_reg, XK_reg, Attn_reg);
@@ -278,15 +300,7 @@ void ttt_mlp_prefill_fp16_ker(
         add(LN_out_bar_reg, LN_out_bar_reg, XQ_reg);
 
         // Store Output
-         store(_Output + i * X_STRIDE, LN_out_bar_reg, LN_out_bar_reg.cols);
-
-        // if ((i + 1) % SMEM_POOL == 0){
-        //     tic ^= 1;
-        //     toc ^= 1;
-        // }
-        // Special case for SMEM_POOL=1
-        tic ^= 1;
-        toc ^= 1;
+        store(_Output + i * X_STRIDE, LN_out_bar_reg, LN_out_bar_reg.cols);
 
     }
 
