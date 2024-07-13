@@ -32,7 +32,8 @@ void ttt_mlp_prefill_fp16_ker(
         T* __W1, T* __W2,
         T* __b1, T* __b2,
         const T* __ln_weight, const T* __ln_bias,
-        const T* __cumsum_matrix, const T* __make_last_b_matrix,
+        // const T* __cumsum_matrix, const T* __make_last_b_matrix,
+        const T* __make_last_b_matrix,
         const T* __make_last_eta_1_matrix, const T* __make_last_eta_2_matrix,
         const T* __XV, const T* __XK, const T* __XQ, const T* __Eta,
         T* __Output
@@ -46,7 +47,7 @@ void ttt_mlp_prefill_fp16_ker(
     const H *_ln_weight = reinterpret_cast<const H*>(__ln_weight) + (blockIdx.x % NH) * (mini_batch_size * HF);
     const H *_ln_bias   = reinterpret_cast<const H*>(__ln_bias) + (blockIdx.x % NH) * (mini_batch_size * HF);
 
-    const H *_cumsum_matrix              = reinterpret_cast<const H*>(__cumsum_matrix);
+    // const H *_cumsum_matrix              = reinterpret_cast<const H*>(__cumsum_matrix);
     const H *_make_last_b_matrix         = reinterpret_cast<const H*>(__make_last_b_matrix);
     const H *_make_last_eta_1_matrix   = reinterpret_cast<const H*>(__make_last_eta_1_matrix);
     const H *_make_last_eta_2_matrix   = reinterpret_cast<const H*>(__make_last_eta_2_matrix);
@@ -83,11 +84,11 @@ void ttt_mlp_prefill_fp16_ker(
     load(ln_w_reg, _ln_weight, ln_w_reg.cols);
     load(ln_b_reg, _ln_bias, ln_b_reg.cols);
 
-    rt_hf<1, 1> cumsum_matrix_bf;
+    // rt_hf<1, 1> cumsum_matrix_bf;
     rt_hf<1, 1> make_last_b_matrix_bf;
     rt_hf<1, 4, kittens::ducks::rt_layout::col> make_last_eta_1_matrix_col;
     rt_hf<1, 16, kittens::ducks::rt_layout::col> make_last_eta_2_matrix_col;
-    load(cumsum_matrix_bf, _cumsum_matrix, cumsum_matrix_bf.cols);
+    // load(cumsum_matrix_bf, _cumsum_matrix, cumsum_matrix_bf.cols);
     // make_last_b_matrix: broadcast last row of b_bar
     load(make_last_b_matrix_bf, _make_last_b_matrix, make_last_b_matrix_bf.cols);
     // make_last_eta_1_matrix_col: broadcast last col of eta_transposed for multiplying X1: [bs,HF_prime]
@@ -273,7 +274,8 @@ void ttt_mlp_prefill_fp16_ker(
         rt_hf<1, 1> Attn_reg;
         rt_hf<1, 16, ducks::rt_layout::col> &dl_dZ1_col_reg = swap_layout_inplace(dl_dZ1_reg);  // [K,4f]r->c
         zero(delta_b1_reg);
-        mul(Attn_reg, eta_reg, cumsum_matrix_bf);
+        // mul(Attn_reg, eta_reg, cumsum_matrix_bf);
+        make_causal(Attn_reg, eta_reg, base_types::constants<half>::zero());
         mma_AB(delta_b1_reg, Attn_reg, dl_dZ1_col_reg, delta_b1_reg);  // [K,4f]r <- [K,K]r @ [K,4f]c
         // b1_bar = b1 - delta_b1
         sub(b1_reg, b1_reg, delta_b1_reg);
@@ -418,7 +420,7 @@ void ttt_mlp_prefill_fp16(
         torch::Tensor b2,
         torch::Tensor ln_weight,
         torch::Tensor ln_bias,
-        torch::Tensor cumsum_matrix,
+        // torch::Tensor cumsum_matrix,
         torch::Tensor make_last_b_matrix,
         torch::Tensor make_last_eta_1_matrix,
         torch::Tensor make_last_eta_2_matrix,
@@ -448,7 +450,8 @@ void ttt_mlp_prefill_fp16(
             W1.data_ptr<T>(), W2.data_ptr<T>(),
             b1.data_ptr<T>(), b2.data_ptr<T>(),
             ln_weight.data_ptr<T>(), ln_bias.data_ptr<T>(),
-            cumsum_matrix.data_ptr<T>(), make_last_b_matrix.data_ptr<T>(),
+            // cumsum_matrix.data_ptr<T>(), make_last_b_matrix.data_ptr<T>(),
+            make_last_b_matrix.data_ptr<T>(),
             make_last_eta_1_matrix.data_ptr<T>(), make_last_eta_2_matrix.data_ptr<T>(),
             XV.data_ptr<T>(), XK.data_ptr<T>(), XQ.data_ptr<T>(), Eta.data_ptr<T>(),
             Output.data_ptr<T>()
